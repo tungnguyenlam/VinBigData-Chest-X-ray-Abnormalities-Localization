@@ -16,11 +16,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Any, Iterator, Literal
 
 import numpy as np
 import torch
 from tqdm.auto import tqdm
+
+try:
+    from torchmetrics.detection.mean_ap import MeanAveragePrecision
+except ImportError:
+    MeanAveragePrecision = None  # type: ignore
 
 from src.config import DataConfig, EnsembleConfig
 from src.data.dataset import build_dataloader
@@ -214,9 +219,7 @@ def evaluate_predictions(
     Compute mAP from a saved JSONL prediction file against ground truth.
     Requires torchmetrics.
     """
-    try:
-        from torchmetrics.detection.mean_ap import MeanAveragePrecision
-    except ImportError:
+    if MeanAveragePrecision is None:
         raise ImportError("pip install torchmetrics")
 
     preds_dict = load_predictions(pred_file)
@@ -229,7 +232,7 @@ def evaluate_predictions(
         shuffle=False,
     )
 
-    metric = MeanAveragePrecision(box_format="xyxy", iou_type="bbox")
+    metric: Any = MeanAveragePrecision(box_format="xyxy", iou_type="bbox")
 
     for _, targets in loader:
         for target in targets:
@@ -245,7 +248,7 @@ def evaluate_predictions(
                 "boxes": target["boxes"],
                 "labels": target["labels"],
             }
-            metric.update([pred_fmt], [gt_fmt])
+            metric.update(preds=[pred_fmt], target=[gt_fmt])
 
-    result = metric.compute()
+    result: dict = metric.compute()
     return {k: float(v.item()) if hasattr(v, "item") else v for k, v in result.items()}
