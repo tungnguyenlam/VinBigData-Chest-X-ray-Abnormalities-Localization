@@ -102,6 +102,7 @@ class YOLODetector(BaseDetector):
             name="train",
             exist_ok=True,
             verbose=True,
+            cache="disk",
         )
 
         # Point model to best weights

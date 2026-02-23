@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+import src.config as app_config
 from src.config import DataConfig, NO_FINDING_CLASS_ID
 from src.data.transforms import get_test_transforms, get_train_transforms, get_val_transforms
 from src.data.utils import aggregate_annotations, get_image_dims, load_annotations, load_image
@@ -62,7 +63,7 @@ class VinBigDataset(Dataset):
             if candidate.is_dir():
                 self._prepared_img_dir = candidate
 
-        if split == "test":
+        if split == "test" and prepared_dataset_root is None:
             self.img_dir = self.root / "test"
             self.ann_df = pd.DataFrame()
             all_ids = [p.stem for p in sorted(self.img_dir.glob("*.dicom"))]
@@ -119,14 +120,46 @@ class VinBigDataset(Dataset):
             # ann_df already has No-finding rows removed
             all_ids = self.ann_df["image_id"].unique().tolist()
 
+        abnormality_ids = set(self.ann_df["image_id"].unique().tolist())
+
         rng = np.random.default_rng(self.cfg.seed)
-        idx = rng.permutation(len(all_ids))
-        n_val = max(1, int(len(all_ids) * self.cfg.val_split))
+        pos = [img_id for img_id in all_ids if img_id in abnormality_ids]
+        neg = [img_id for img_id in all_ids if img_id not in abnormality_ids]
+        rng.shuffle(pos)
+        rng.shuffle(neg)
+
+        def split_group(group_ids: list[str]) -> tuple[list[str], list[str], list[str]]:
+            n = len(group_ids)
+            if n == 0:
+                return [], [], []
+
+            n_val = int(round(n * self.cfg.val_split))
+            n_test = int(round(n * self.cfg.test_split))
+            n_val = min(max(n_val, 0), n)
+            n_test = min(max(n_test, 0), n - n_val)
+
+            val_ids = group_ids[:n_val]
+            test_ids = group_ids[n_val : n_val + n_test]
+            train_ids = group_ids[n_val + n_test :]
+            return train_ids, val_ids, test_ids
+
+        train_pos, val_pos, test_pos = split_group(pos)
+        train_neg, val_neg, test_neg = split_group(neg)
+
+        train_ids = train_pos + train_neg
+        val_ids = val_pos + val_neg
+        test_ids = test_pos + test_neg
+
+        rng.shuffle(train_ids)
+        rng.shuffle(val_ids)
+        rng.shuffle(test_ids)
 
         if self.split == "val":
-            return [all_ids[i] for i in idx[:n_val]]
+            return val_ids
+        elif self.split == "test":
+            return test_ids
         else:
-            return [all_ids[i] for i in idx[n_val:]]
+            return train_ids
 
     def _resolve_image_path(self, image_id: str) -> Path:
         """Return the best available image file: prepared PNG first, then DICOM."""
@@ -209,8 +242,10 @@ class VinBigDataset(Dataset):
         out_h, out_w = self.cfg.image_size, self.cfg.image_size
 
         if len(abs_boxes) > 0:
+            # Map labels to contiguous indices (handles 1-class collapsing)
+            mapped_labels = [app_config.CLASS_ID_TO_IDX.get(int(l), 0) for l in labels_list]
             boxes_t = torch.as_tensor(abs_boxes, dtype=torch.float32)
-            labels_t = torch.as_tensor(labels_list, dtype=torch.int64)
+            labels_t = torch.as_tensor(mapped_labels, dtype=torch.long)
         else:
             boxes_t = torch.zeros((0, 4), dtype=torch.float32)
             labels_t = torch.zeros(0, dtype=torch.int64)
@@ -275,12 +310,14 @@ def build_dataloader(
 
     collate_fn = collate_yolo if output_format == "yolo" else collate_torchvision
 
-    return DataLoader(
-        dataset,
-        batch_size=cfg.batch_size,
-        shuffle=shuffle,
-        num_workers=cfg.num_workers,
-        collate_fn=collate_fn,
-        pin_memory=cfg.num_workers > 0,
-        persistent_workers=cfg.num_workers > 0,
-    )
+    loader_kwargs: dict = {
+        "batch_size": cfg.batch_size,
+        "shuffle": shuffle,
+        "num_workers": cfg.num_workers,
+        "collate_fn": collate_fn,
+        "pin_memory": cfg.num_workers > 0 and torch.cuda.is_available(),
+        "persistent_workers": cfg.num_workers > 0,
+    }
+    if cfg.num_workers > 0:
+        loader_kwargs["prefetch_factor"] = 4
+    return DataLoader(dataset, **loader_kwargs)

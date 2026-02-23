@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pydicom
 
+import src.config as app_config
 from src.config import NO_FINDING_CLASS_ID
 
 
@@ -75,24 +76,51 @@ def dicom_to_array_16bit(path: str | Path, apply_clahe: bool = True) -> np.ndarr
     return arr  # single-channel uint16 (H, W)
 
 
+def convert_uint16_to_uint8(
+    arr16: np.ndarray,
+    method: str = "percentile",
+    lower_pct: float = 0.5,
+    upper_pct: float = 99.5,
+) -> np.ndarray:
+    """
+    Convert a uint16 grayscale image to uint8.
+
+    method="percentile" is robust to outliers and generally preserves chest
+    contrast better than a plain bit shift.
+    """
+    if arr16.dtype != np.uint16:
+        arr16 = arr16.astype(np.uint16)
+
+    if method == "bitshift":
+        return (arr16 >> 8).astype(np.uint8)
+
+    if method == "minmax":
+        lo = float(arr16.min())
+        hi = float(arr16.max())
+    else:
+        lo = float(np.percentile(arr16, lower_pct))
+        hi = float(np.percentile(arr16, upper_pct))
+
+    if hi <= lo:
+        return np.zeros_like(arr16, dtype=np.uint8)
+
+    clipped = np.clip(arr16, lo, hi)
+    scaled = (clipped - lo) / (hi - lo)
+    return (scaled * 255.0).astype(np.uint8)
+
+
 def load_image(path: str | Path, size: int, apply_clahe: bool = True) -> np.ndarray:
     """
     Load a DICOM or PNG/JPG, resize to (size, size), return uint8 BGR.
-
-    16-bit PNGs (saved by dicom_to_array_16bit) are converted back to uint8
-    so the rest of the pipeline (albumentations, ToTensorV2) stays unchanged.
     """
     path = Path(path)
     if path.suffix.lower() in (".dicom", ".dcm"):
         arr = dicom_to_array(path, apply_clahe=apply_clahe)
     else:
-        # cv2.IMREAD_ANYDEPTH preserves 16-bit PNGs; fall back to normal read
-        arr = cv2.imread(str(path), cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
+        # Load directly as uint8 BGR (standard for YOLO/Inference)
+        arr = cv2.imread(str(path))
         if arr is None:
-            arr = cv2.imread(str(path))
-        if arr is not None and arr.dtype == np.uint16:
-            # Scale 16-bit → 8-bit for albumentations compatibility
-            arr = (arr >> 8).astype(np.uint8)
+            raise FileNotFoundError(f"Could not read image: {path}")
 
     arr = cv2.resize(arr, (size, size), interpolation=cv2.INTER_LINEAR)
     return arr
@@ -219,12 +247,15 @@ def write_yolo_labels(
 
     lines = []
     for box, cls in zip(boxes, labels):
+        # Map class_id to contiguous index (handles 14 -> 1 collapsing if LOCALIZE_ONLY)
+        cls_idx = app_config.CLASS_ID_TO_IDX.get(int(cls), 0)
+        
         x1, y1, x2, y2 = box
         cx = (x1 + x2) / 2
         cy = (y1 + y2) / 2
         w = x2 - x1
         h = y2 - y1
-        lines.append(f"{int(cls)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+        lines.append(f"{cls_idx} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
 
     out_path.write_text("\n".join(lines))
 
@@ -315,6 +346,7 @@ def write_yolo_yaml(
     train_img_dir: str | Path,
     val_img_dir: str | Path,
     class_names: list[str],
+    test_img_dir: str | Path | None = None,
 ) -> None:
     """Write a dataset YAML file for Ultralytics YOLO."""
     import yaml
@@ -325,6 +357,8 @@ def write_yolo_yaml(
         "nc": len(class_names),
         "names": class_names,
     }
+    if test_img_dir:
+        data["test"] = str(test_img_dir)
     yaml_path = Path(yaml_path)
     yaml_path.parent.mkdir(parents=True, exist_ok=True)
     with open(yaml_path, "w") as f:

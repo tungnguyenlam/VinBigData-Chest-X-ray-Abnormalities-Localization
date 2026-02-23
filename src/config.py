@@ -45,9 +45,16 @@ def get_output_root(paths_file: str | Path | None = None) -> str:
     return load_paths(paths_file).get("output_root", "outputs")
 
 
-NUM_CLASSES = 14  # excludes "No finding" (class_id 14)
+# ---------------------------------------------------------------------------
+# Class Configuration
+# ---------------------------------------------------------------------------
 
-CLASS_NAMES = [
+# SET TO True to collapse all 14 abnormality classes into a single "Abnormality" class.
+LOCALIZE_ONLY = True
+
+NUM_CLASSES = 1 if LOCALIZE_ONLY else 14
+
+CLASS_NAMES = ["Abnormality"] if LOCALIZE_ONLY else [
     "Aortic enlargement",   # 0
     "Atelectasis",          # 1
     "Calcification",        # 2
@@ -64,8 +71,8 @@ CLASS_NAMES = [
     "Pulmonary fibrosis",   # 13
 ]
 
-# Maps original class_id (0-13) to contiguous index used in models
-CLASS_ID_TO_IDX: dict[int, int] = {i: i for i in range(14)}
+# Maps original class_id (0-13) to contiguous index used in models (0 or 0-13)
+CLASS_ID_TO_IDX: dict[int, int] = {i: (0 if LOCALIZE_ONLY else i) for i in range(14)}
 NO_FINDING_CLASS_ID = 14
 
 
@@ -79,7 +86,8 @@ class DataConfig:
     cache_dir: str = "data/cache"
     wbf_iou_thr: float = 0.5
     wbf_skip_box_thr: float = 0.0001
-    val_split: float = 0.1
+    val_split: float = 0.05
+    test_split: float = 0.1
     seed: int = 42
     include_no_finding: bool = True  # include "No finding" images as hard negatives
 
@@ -167,7 +175,7 @@ class HardwarePreset:
                 image_size=640,
                 batch_size=8,
                 num_workers=4,
-                cache_images=True,
+                cache_images=False,
             ),
             model=ModelConfig(
                 arch=arch,
@@ -190,7 +198,7 @@ class HardwarePreset:
                 image_size=1024,
                 batch_size=16,
                 num_workers=8,
-                cache_images=True,
+                cache_images=False,
             ),
             model=ModelConfig(
                 arch=arch,

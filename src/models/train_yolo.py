@@ -127,10 +127,29 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--localize_only",
+        action="store_true",
+        help="Collapse all 14 abnormality classes into a single 'Abnormality' class.",
+    )
+    parser.add_argument(
         "--epochs",
         type=int,
         default=None,
         help="Number of training epochs. Overrides the preset default.",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=None,
+        dest="batch_size",
+        help="Training batch size. Overrides the preset default.",
+    )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=None,
+        dest="num_workers",
+        help="Number of DataLoader workers. Overrides the preset default.",
     )
     parser.add_argument(
         "--device",
@@ -188,6 +207,13 @@ def main() -> None:
     data_root   = args.data   or get_data_root()
     output_root = args.output or get_output_root()
 
+    if args.localize_only:
+        import src.config
+        src.config.LOCALIZE_ONLY = True
+        src.config.NUM_CLASSES = 1
+        src.config.CLASS_NAMES = ["Abnormality"]
+        src.config.CLASS_ID_TO_IDX = {i: 0 for i in range(14)}
+
     # Resolve default model size from preset, then allow override
     preset_default_size = {"small": "n", "medium": "s", "large": "l"}[args.preset]
     model_size = args.model_size or preset_default_size
@@ -196,9 +222,24 @@ def main() -> None:
 
     if args.epochs is not None:
         model_cfg.epochs = args.epochs
+    if args.batch_size is not None:
+        data_cfg.batch_size = args.batch_size
+    if args.num_workers is not None:
+        data_cfg.num_workers = args.num_workers
     if args.device is not None:
         model_cfg.device = args.device
     data_cfg.include_no_finding = args.include_no_finding
+
+    # Optimization for MPS (Apple Silicon)
+    if model_cfg.device == "mps":
+        # Increase batch size for small models to saturate GPU (only if not explicitly set)
+        if model_size == "n" and data_cfg.batch_size < 16 and args.batch_size is None:
+            print(f"  MPS optimization: increasing batch size {data_cfg.batch_size} -> 16")
+            data_cfg.batch_size = 16
+        # Reduce workers on macOS to avoid memory pressure/overhead (only if not explicitly set)
+        if data_cfg.num_workers > 2 and args.num_workers is None:
+            print(f"  MPS optimization: reducing workers {data_cfg.num_workers} -> 2")
+            data_cfg.num_workers = 2
 
     # Resolve prepared dataset path: explicit arg > default location
     prepared_dataset_root: Path | None = None
@@ -273,6 +314,7 @@ def main() -> None:
             name="train",
             exist_ok=True,
             verbose=True,
+            cache="disk",
         )
         best = model_cfg.output_path / "train" / "weights" / "best.pt"
         if best.exists():
