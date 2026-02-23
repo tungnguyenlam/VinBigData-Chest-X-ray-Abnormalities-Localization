@@ -35,7 +35,9 @@ def create_zip_parts(
         (part_work_dir / "labels").mkdir(parents=True, exist_ok=True)
 
         print(f"  Preparing {part_name} ({len(chunk_images)} images)...")
-        for img_path in chunk_images:
+        from tqdm import tqdm
+
+        for img_path in tqdm(chunk_images, desc=f"Copying {part_name}"):
             # Copy image
             shutil.copy2(img_path, part_work_dir / "images" / img_path.name)
             # Copy label if exists
@@ -43,6 +45,7 @@ def create_zip_parts(
             if lbl_path.exists():
                 shutil.copy2(lbl_path, part_work_dir / "labels" / lbl_path.name)
 
+        print(f"  Zipping {part_name} (this may take a few minutes)...")
         # Create zip
         zip_file = shutil.make_archive(
             str(output_dir / part_name), "zip", str(part_work_dir)
