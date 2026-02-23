@@ -58,29 +58,6 @@ def dicom_to_array(path: str | Path, apply_clahe: bool = True) -> np.ndarray:
     return arr
 
 
-def dicom_to_array_16bit(path: str | Path, apply_clahe: bool = True) -> np.ndarray:
-    """
-    Read a DICOM file and return a uint16 single-channel array (H, W).
-
-    Preserves the full dynamic range of the original image (12–16 bit).
-    CLAHE is applied in 16-bit mode (OpenCV supports this natively).
-    Use cv2.imwrite(..., arr) to save as a lossless 16-bit PNG.
-    """
-    arr, _ = _read_dicom_pixels(path)
-
-    arr_min, arr_max = arr.min(), arr.max()
-    if arr_max > arr_min:
-        arr = (arr - arr_min) / (arr_max - arr_min) * 65535.0
-    arr = arr.astype(np.uint16)
-
-    if apply_clahe:
-        # cv2.createCLAHE works on uint16 (INTER_16U) natively
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        arr = clahe.apply(arr)
-
-    return arr  # single-channel uint16 (H, W)
-
-
 def dicom_to_3channel_8bit(
     path: str | Path, image_size: int | None = None
 ) -> np.ndarray:
@@ -123,39 +100,6 @@ def dicom_to_3channel_8bit(
 
     # Stack to (H, W, 3)
     return np.stack([ch1, ch2, ch3], axis=-1)
-
-
-def convert_uint16_to_uint8(
-    arr16: np.ndarray,
-    method: str = "percentile",
-    lower_pct: float = 0.5,
-    upper_pct: float = 99.5,
-) -> np.ndarray:
-    """
-    Convert a uint16 grayscale image to uint8.
-
-    method="percentile" is robust to outliers and generally preserves chest
-    contrast better than a plain bit shift.
-    """
-    if arr16.dtype != np.uint16:
-        arr16 = arr16.astype(np.uint16)
-
-    if method == "bitshift":
-        return (arr16 >> 8).astype(np.uint8)
-
-    if method == "minmax":
-        lo = float(arr16.min())
-        hi = float(arr16.max())
-    else:
-        lo = float(np.percentile(arr16, lower_pct))
-        hi = float(np.percentile(arr16, upper_pct))
-
-    if hi <= lo:
-        return np.zeros_like(arr16, dtype=np.uint8)
-
-    clipped = np.clip(arr16, lo, hi)
-    scaled = (clipped - lo) / (hi - lo)
-    return (scaled * 255.0).astype(np.uint8)
 
 
 def load_image(path: str | Path, size: int, apply_clahe: bool = True) -> np.ndarray:
@@ -315,14 +259,6 @@ def write_yolo_labels(
         lines.append(f"{cls_idx} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
 
     out_path.write_text("\n".join(lines))
-
-
-def _write_label_worker(args: tuple) -> None:
-    """Write one YOLO label file. Top-level for ProcessPoolExecutor pickling."""
-    img_id, img_dir, label_dir, iou_thr = args
-    # ann_df is not picklable for large dataframes, so we re-read the rows
-    # from the shared CSV slice passed as a dict: {image_id: [(cls, x1,y1,x2,y2), ...]}
-    raise NotImplementedError  # placeholder — see build_yolo_dataset below
 
 
 def build_yolo_dataset(
