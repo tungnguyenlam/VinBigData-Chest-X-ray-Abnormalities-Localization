@@ -7,7 +7,7 @@ Usage
 python src/models/train_yolo.py
 
 # Dataset already prepared — skip DICOM conversion, start training immediately
-python src/models/train_yolo.py --prepared_dataset outputs/prepared_dataset
+python src/models/train_yolo.py --prepared_dataset data/processed
 
 # Small hardware (CPU, tiny model, 5 epochs)
 python src/models/train_yolo.py --preset small --epochs 5
@@ -19,8 +19,9 @@ python src/models/train_yolo.py --data /kaggle/input/vinbigdata-chest-xray-abnor
 python src/models/train_yolo.py --preset large --epochs 50 --device cuda:0
 
 # Skip training, just run predictions from existing weights
-python src/models/train_yolo.py --predict_only outputs/yolo/train/weights/best.pt --prepared_dataset outputs/prepared_dataset
+python src/models/train_yolo.py --predict_only outputs/yolo/train/weights/best.pt --prepared_dataset data/processed
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,7 +33,14 @@ from pathlib import Path
 # `src.*` imports work when running this file directly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import DataConfig, ModelConfig, HardwarePreset, get_data_root, get_output_root
+from src.config import (
+    DataConfig,
+    ModelConfig,
+    HardwarePreset,
+    get_data_root,
+    get_output_root,
+    get_processed_data_root,
+)
 from src.models.yolo import YOLODetector
 from src.predict_logger import predict_and_log
 
@@ -41,6 +49,7 @@ from src.predict_logger import predict_and_log
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def build_preset(
     preset_name: str,
     data_root: str,
@@ -48,9 +57,9 @@ def build_preset(
     model_size: str,
 ) -> tuple[DataConfig, ModelConfig]:
     preset = {
-        "small":  HardwarePreset.small,
+        "small": HardwarePreset.small,
         "medium": HardwarePreset.medium,
-        "large":  HardwarePreset.large,
+        "large": HardwarePreset.large,
     }[preset_name](root=data_root, arch="yolo")
 
     preset.model.output_dir = output_root
@@ -67,7 +76,9 @@ def print_config(data_cfg: DataConfig, model_cfg: ModelConfig) -> None:
     print(f"  batch size    : {data_cfg.batch_size}")
     print(f"  num workers   : {data_cfg.num_workers}")
     print(f"  val split     : {data_cfg.val_split:.0%}")
-    print(f"  no-finding    : {'included (hard negatives)' if data_cfg.include_no_finding else 'excluded'}")
+    print(
+        f"  no-finding    : {'included (hard negatives)' if data_cfg.include_no_finding else 'excluded'}"
+    )
     print(f"  WBF iou thr   : {data_cfg.wbf_iou_thr}")
     print(f"  model size    : yolov8{model_cfg.backbone_size}")
     print(f"  epochs        : {model_cfg.epochs}")
@@ -81,6 +92,7 @@ def print_config(data_cfg: DataConfig, model_cfg: ModelConfig) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -179,36 +191,18 @@ def parse_args() -> argparse.Namespace:
         default=0.0,
         help="Score threshold when logging predictions (0 = keep all).",
     )
-    parser.add_argument(
-        "--prepared_dataset",
-        type=str,
-        default=None,
-        metavar="PATH",
-        help=(
-            "Path to an already-prepared dataset directory "
-            "(output of src/data/prepare_dataset.py, e.g. outputs/prepared_dataset). "
-            "When given, DICOM conversion is skipped entirely."
-        ),
-    )
-    parser.add_argument(
-        "--force_rebuild",
-        action="store_true",
-        help=(
-            "Delete and rebuild the prepared dataset even if it already "
-            "exists (use after changing image_size or WBF threshold)."
-        ),
-    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    data_root   = args.data   or get_data_root()
+    data_root = args.data or get_data_root()
     output_root = args.output or get_output_root()
 
     if args.localize_only:
         import src.config
+
         src.config.LOCALIZE_ONLY = True
         src.config.NUM_CLASSES = 1
         src.config.CLASS_NAMES = ["Abnormality"]
@@ -234,21 +228,16 @@ def main() -> None:
     if model_cfg.device == "mps":
         # Increase batch size for small models to saturate GPU (only if not explicitly set)
         if model_size == "n" and data_cfg.batch_size < 16 and args.batch_size is None:
-            print(f"  MPS optimization: increasing batch size {data_cfg.batch_size} -> 16")
+            print(
+                f"  MPS optimization: increasing batch size {data_cfg.batch_size} -> 16"
+            )
             data_cfg.batch_size = 16
         # Reduce workers on macOS to avoid memory pressure/overhead (only if not explicitly set)
         if data_cfg.num_workers > 2 and args.num_workers is None:
             print(f"  MPS optimization: reducing workers {data_cfg.num_workers} -> 2")
             data_cfg.num_workers = 2
 
-    # Resolve prepared dataset path: explicit arg > default location
-    prepared_dataset_root: Path | None = None
-    if args.prepared_dataset:
-        prepared_dataset_root = Path(args.prepared_dataset)
-    else:
-        default = Path(output_root) / "prepared_dataset"
-        if (default / "manifest.json").exists():
-            prepared_dataset_root = default
+    prepared_dataset_root = Path(get_processed_data_root())
 
     print_config(data_cfg, model_cfg)
     if prepared_dataset_root:
@@ -284,44 +273,7 @@ def main() -> None:
     # Training
     # ------------------------------------------------------------------
     detector = YOLODetector(data_cfg, model_cfg)
-
-    # Optionally wipe the prepared dataset to force a rebuild
-    if args.force_rebuild:
-        import shutil
-        target = prepared_dataset_root or (Path(output_root) / "prepared_dataset")
-        if target.exists():
-            shutil.rmtree(target)
-            print(f"Removed existing prepared dataset at {target}")
-        prepared_dataset_root = None  # will be rebuilt during train_model
-
-    if prepared_dataset_root and (prepared_dataset_root / "dataset.yaml").exists():
-        # Dataset already prepared — skip DICOM conversion, go straight to training
-        print("Step 1/3 — Using existing prepared dataset, skipping DICOM conversion.")
-        yaml_path = prepared_dataset_root / "dataset.yaml"
-        from ultralytics import YOLO as _YOLO
-        detector.model.train(
-            data=str(yaml_path),
-            epochs=model_cfg.epochs,
-            imgsz=data_cfg.image_size,
-            batch=data_cfg.batch_size,
-            workers=data_cfg.num_workers,
-            device=model_cfg.device,
-            amp=model_cfg.amp,
-            lr0=model_cfg.lr,
-            weight_decay=model_cfg.weight_decay,
-            warmup_epochs=model_cfg.warmup_epochs,
-            project=str(model_cfg.output_path),
-            name="train",
-            exist_ok=True,
-            verbose=True,
-            cache="disk",
-        )
-        best = model_cfg.output_path / "train" / "weights" / "best.pt"
-        if best.exists():
-            detector.load(best)
-    else:
-        print("Step 1/3 — Preparing dataset (DICOM → PNG + label files)...")
-        detector.train_model()
+    detector.train_model()
 
     # Save final weights explicitly
     final_weights = Path(output_root) / "yolo" / "best.pt"
@@ -346,15 +298,15 @@ def main() -> None:
     del detector
     gc.collect()
 
-    print(f"\nDone.")
+    print("\nDone.")
     print(f"  Weights      → {final_weights}")
     print(f"  Predictions  → {pred_path}")
     print(
-        f"\nTo inspect predictions:\n"
-        f"  python -c \""
+        "\nTo inspect predictions:\n"
+        f'  python -c "'
         f"from src.predict_logger import load_predictions; "
         f"p = load_predictions('{pred_path}'); "
-        f"img_id = next(iter(p)); print(img_id, p[img_id])\""
+        f'img_id = next(iter(p)); print(img_id, p[img_id])"'
     )
 
 

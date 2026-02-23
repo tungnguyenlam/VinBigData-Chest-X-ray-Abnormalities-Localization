@@ -10,25 +10,27 @@ One line per image:
 The stacking step reads all per-model JSONL files and fuses them with WBF —
 without ever loading more than one model into memory at a time.
 """
+
 from __future__ import annotations
 
-import gc
+
 import json
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Literal
 
 import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from src.config import DataConfig, EnsembleConfig, ModelConfig, NUM_CLASSES
-from src.data.dataset import VinBigDataset, build_dataloader
+from src.config import DataConfig, EnsembleConfig
+from src.data.dataset import build_dataloader
 from src.models.base import BaseDetector, Detection
 
 
 # ---------------------------------------------------------------------------
 # JSONL writer / reader
 # ---------------------------------------------------------------------------
+
 
 class PredictionWriter:
     """Appends one Detection per line to a JSONL file."""
@@ -80,10 +82,11 @@ def load_predictions(path: str | Path) -> dict[str, Detection]:
 # Per-model prediction runner (one image at a time)
 # ---------------------------------------------------------------------------
 
+
 def predict_and_log(
     model: BaseDetector,
     data_cfg: DataConfig,
-    split: str,
+    split: Literal["train", "val", "test"],
     output_path: str | Path,
     score_threshold: float = 0.0,
     batch_size: int = 1,
@@ -94,7 +97,7 @@ def predict_and_log(
     immediately to disk.  Uses batch_size=1 by default to minimise peak RAM.
 
     prepared_dataset_root : path to the output of prepare_dataset.py
-        (e.g. "outputs/prepared_dataset").  When provided, images are loaded
+        (e.g. "data/processed").  When provided, images are loaded
         from pre-converted 16-bit PNGs instead of raw DICOMs.
 
     Returns the path to the written JSONL file.
@@ -102,6 +105,7 @@ def predict_and_log(
     output_path = Path(output_path)
 
     import copy
+
     cfg_1 = copy.copy(data_cfg)
     cfg_1.batch_size = batch_size
     cfg_1.num_workers = min(data_cfg.num_workers, 2)
@@ -139,6 +143,7 @@ def predict_and_log(
 # ---------------------------------------------------------------------------
 # Stacking from saved prediction files
 # ---------------------------------------------------------------------------
+
 
 def stack_predictions(
     pred_files: list[str | Path],
@@ -180,13 +185,14 @@ def stack_predictions(
     dummy_ensemble.models = []
     dummy_ensemble.cfg = cfg
 
-    print(f"  Fusing {len(all_ids)} images from {len(pred_files)} models → {output_path}")
+    print(
+        f"  Fusing {len(all_ids)} images from {len(pred_files)} models → {output_path}"
+    )
 
     with PredictionWriter(output_path) as writer:
         for img_id in tqdm(all_ids, desc="fuse"):
             img_preds = [
-                model_preds.get(img_id, Detection())
-                for model_preds in per_model
+                model_preds.get(img_id, Detection()) for model_preds in per_model
             ]
             fused = dummy_ensemble._fuse_single(img_preds)
             writer.write(img_id, fused)
@@ -198,10 +204,11 @@ def stack_predictions(
 # mAP evaluation from a prediction JSONL file
 # ---------------------------------------------------------------------------
 
+
 def evaluate_predictions(
     pred_file: str | Path,
     data_cfg: DataConfig,
-    split: str = "val",
+    split: Literal["train", "val", "test"] = "val",
 ) -> dict:
     """
     Compute mAP from a saved JSONL prediction file against ground truth.

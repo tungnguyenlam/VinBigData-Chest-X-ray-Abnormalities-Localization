@@ -10,7 +10,9 @@
 # External drive / custom location:
 #   data_root: /Volumes/HP_P900/data/vinbigdata
 
-data_root: data
+data_root: data/raw
+processed_data_root: data/processed
+
 
 # Where trained model weights and prediction logs are saved.
 output_root: outputs

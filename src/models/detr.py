@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+
 
 import numpy as np
 import torch
@@ -52,10 +52,14 @@ class DETRDetector(BaseDetector):
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.device = torch.device(
-            model_cfg.device if torch.cuda.is_available() or model_cfg.device == "cpu" else "cpu"
+            model_cfg.device
+            if torch.cuda.is_available() or model_cfg.device == "cpu"
+            else "cpu"
         )
 
-        checkpoint = _DETR_CHECKPOINTS.get(model_cfg.backbone_size, "facebook/detr-resnet-50")
+        checkpoint = _DETR_CHECKPOINTS.get(
+            model_cfg.backbone_size, "facebook/detr-resnet-50"
+        )
 
         # Load config, override num_labels to our dataset
         hf_cfg = DetrConfig.from_pretrained(checkpoint)
@@ -67,7 +71,8 @@ class DETRDetector(BaseDetector):
             checkpoint,
             config=hf_cfg,
             ignore_mismatched_sizes=True,
-        ).to(self.device)
+        )
+        self.model.to(device=self.device)
 
         # Processor handles pixel normalization and target formatting for HF
         self.processor = DetrImageProcessor.from_pretrained(checkpoint)
@@ -99,7 +104,7 @@ class DETRDetector(BaseDetector):
 
         for epoch in range(1, self.model_cfg.epochs + 1):
             train_loss = self._train_epoch(train_loader, optimizer, scaler)
-            val_loss = self._val_epoch(val_loader)
+            val_loss = self._val_epoch(val_loader, epoch)
             scheduler.step()
 
             print(
@@ -129,8 +134,11 @@ class DETRDetector(BaseDetector):
         """
         pixel_values = torch.stack(images, dim=0).to(self.device)
         pixel_mask = torch.ones(
-            pixel_values.shape[0], pixel_values.shape[2], pixel_values.shape[3],
-            dtype=torch.long, device=self.device,
+            pixel_values.shape[0],
+            pixel_values.shape[2],
+            pixel_values.shape[3],
+            dtype=torch.long,
+            device=self.device,
         )
 
         hf_targets = []
@@ -139,10 +147,16 @@ class DETRDetector(BaseDetector):
             labels = t["labels"]
 
             if len(boxes_xyxy) == 0:
-                hf_targets.append({
-                    "class_labels": torch.zeros(0, dtype=torch.long, device=self.device),
-                    "boxes": torch.zeros((0, 4), dtype=torch.float32, device=self.device),
-                })
+                hf_targets.append(
+                    {
+                        "class_labels": torch.zeros(
+                            0, dtype=torch.long, device=self.device
+                        ),
+                        "boxes": torch.zeros(
+                            (0, 4), dtype=torch.float32, device=self.device
+                        ),
+                    }
+                )
                 continue
 
             # Normalize and convert to cx cy w h
@@ -152,10 +166,12 @@ class DETRDetector(BaseDetector):
             bh = (boxes_xyxy[:, 3] - boxes_xyxy[:, 1]) / image_size
             cxcywh = torch.stack([cx, cy, bw, bh], dim=1).to(self.device)
 
-            hf_targets.append({
-                "class_labels": labels.to(self.device),
-                "boxes": cxcywh,
-            })
+            hf_targets.append(
+                {
+                    "class_labels": labels.to(self.device),
+                    "boxes": cxcywh,
+                }
+            )
 
         encoding = {"pixel_values": pixel_values, "pixel_mask": pixel_mask}
         return encoding, hf_targets
@@ -178,14 +194,19 @@ class DETRDetector(BaseDetector):
             encoding, hf_targets = self._prepare_batch(images, targets, img_size)
 
             optimizer.zero_grad()
-            with torch.cuda.amp.autocast(enabled=self.model_cfg.amp and self.device.type == "cuda"):
+            with torch.amp.autocast(
+                device_type=self.device.type,
+                enabled=self.model_cfg.amp and self.device.type == "cuda",
+            ):
                 outputs = self.model(**encoding, labels=hf_targets)
                 loss = outputs.loss
 
             scaler.scale(loss).backward()
             if self.model_cfg.grad_clip > 0:
                 scaler.unscale_(optimizer)
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.model_cfg.grad_clip)
+                nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.model_cfg.grad_clip
+                )
             scaler.step(optimizer)
             scaler.update()
 
@@ -193,18 +214,45 @@ class DETRDetector(BaseDetector):
 
         return total_loss / max(1, len(loader))
 
-    def _val_epoch(self, loader: DataLoader) -> float:
+    def _val_epoch(self, loader: DataLoader, epoch: int) -> float:
         self.model.train()  # keep in train mode to compute DETR loss
         total_loss = 0.0
         img_size = self.data_cfg.image_size
+        saved_preview = False
 
         with torch.no_grad():
             for images, targets in loader:
                 if all(len(t["boxes"]) == 0 for t in targets):
                     continue
 
+                if not saved_preview:
+                    saved_preview = True
+                    self.model.eval()
+                    valid_idx = next(
+                        i for i, t in enumerate(targets) if len(t["boxes"]) > 0
+                    )
+                    preds = self.predict([images[valid_idx]], image_size=img_size)
+                    self.model.train()
+
+                    from src.visualize import draw_and_save_preview
+
+                    save_path = (
+                        self.output_dir / "val_previews" / f"epoch_{epoch:03d}.jpg"
+                    )
+                    draw_and_save_preview(
+                        image_tensor=images[valid_idx],
+                        pred_detection=preds[0],
+                        target_boxes=targets[valid_idx]["boxes"],
+                        target_labels=targets[valid_idx]["labels"],
+                        save_path=save_path,
+                        image_size=img_size,
+                    )
+
                 encoding, hf_targets = self._prepare_batch(images, targets, img_size)
-                with torch.cuda.amp.autocast(enabled=self.model_cfg.amp and self.device.type == "cuda"):
+                with torch.amp.autocast(
+                    device_type=self.device.type,
+                    enabled=self.model_cfg.amp and self.device.type == "cuda",
+                ):
                     outputs = self.model(**encoding, labels=hf_targets)
                     loss = outputs.loss
 
@@ -230,8 +278,11 @@ class DETRDetector(BaseDetector):
 
         pixel_values = torch.stack(image_list, dim=0).to(self.device)
         pixel_mask = torch.ones(
-            pixel_values.shape[0], pixel_values.shape[2], pixel_values.shape[3],
-            dtype=torch.long, device=self.device,
+            pixel_values.shape[0],
+            pixel_values.shape[2],
+            pixel_values.shape[3],
+            dtype=torch.long,
+            device=self.device,
         )
 
         with torch.no_grad():
@@ -239,7 +290,7 @@ class DETRDetector(BaseDetector):
 
         target_sizes = torch.tensor(
             [[image_size, image_size]] * len(image_list),
-            device=self.device,
+            dtype=torch.float32,
         )
         results = self.processor.post_process_object_detection(
             outputs,
@@ -249,7 +300,7 @@ class DETRDetector(BaseDetector):
 
         detections: list[Detection] = []
         for r in results:
-            boxes = r["boxes"].cpu().numpy()    # absolute xyxy
+            boxes = r["boxes"].cpu().numpy()  # absolute xyxy
             scores = r["scores"].cpu().numpy()
             labels = r["labels"].cpu().numpy().astype(np.int32)
 
@@ -277,7 +328,8 @@ class DETRDetector(BaseDetector):
         path = Path(path)
         hf_dir = path.with_suffix("")
         if hf_dir.is_dir():
-            self.model = DetrForObjectDetection.from_pretrained(str(hf_dir)).to(self.device)
+            self.model = DetrForObjectDetection.from_pretrained(str(hf_dir))
+            self.model.to(device=self.device)
         else:
             state = torch.load(str(path), map_location=self.device)
             self.model.load_state_dict(state)

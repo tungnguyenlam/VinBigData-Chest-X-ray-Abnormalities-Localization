@@ -1,35 +1,54 @@
 # VinBigData-Chest-X-ray-Abnormalities-Localization
 
-## Dataset Management
+## 1. Setup & Download Dataset
 
-### 1. Preparation
+First, clone the repository and install the dependencies:
+```bash
+git clone https://github.com/tungnguyenlam/VinBigData-Chest-X-ray-Abnormalities-Localization.git
+cd VinBigData-Chest-X-ray-Abnormalities-Localization
+pip install -r requirements.txt
+```
+
+Next, download the raw dataset from Kaggle into the `data/raw` directory (requires Kaggle API token):
+
+```bash
+mkdir -p data/raw
+cd data/raw
+kaggle competitions download -c vinbigdata-chest-xray-abnormalities-detection
+unzip vinbigdata-chest-xray-abnormalities-detection.zip
+cd ../..
+```
+
+## 2. Dataset Management
+
+### 2.1. Preparation
 Convert raw DICOM images to 8-bit grayscale PNGs and generate aggregated YOLO labels (WBF). The original training data is split into **train (85%)**, **val (5%)**, and **local test (10%)** sets.
 
 ```bash
-python src/data/prepare_dataset.py --force
+python scripts/data/prepare.py --force
 ```
 *Note: Images are processed at 16-bit for quality but saved as 8-bit for YOLOv8/v11 compatibility.*
 
-### 2. Hugging Face Upload
+### 2.2. Hugging Face Upload
 Upload the processed dataset to Hugging Face as multiple zip files (chunks) to handle large file counts reliably.
 
 Hugging Face dataset repos can hit limits when a single folder contains too many files (commonly around 10k entries). Keep using zip shards and clean stale remote files on re-upload.
 
 ```bash
-python src/data/upload_to_hf.py \
+python scripts/data/upload.py \
     --repo_id "TheBlindMaster/VinBigData-Chest-X-ray-Prepared" \
-    --folder "outputs/prepared_dataset" \
+    --folder "data/processed" \
     --chunk_size 5000 \
     --clean_remote
 ```
 
-### 3. Hugging Face Download
+### 2.3. Hugging Face Download
 Restore the exact dataset structure from Hugging Face on a new machine.
 
 ```bash
-python src/data/download_from_hf.py \
+python scripts/data/download.py \
     --repo_id "TheBlindMaster/VinBigData-Chest-X-ray-Prepared" \
-    --output "outputs/prepared_dataset"
+    --output "data/processed"
 ```
 
 ## GPU utilization

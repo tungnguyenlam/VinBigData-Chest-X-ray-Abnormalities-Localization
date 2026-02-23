@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Callable, Literal, Optional
 
@@ -11,9 +10,18 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 import src.config as app_config
-from src.config import DataConfig, NO_FINDING_CLASS_ID
-from src.data.transforms import get_test_transforms, get_train_transforms, get_val_transforms
-from src.data.utils import aggregate_annotations, get_image_dims, load_annotations, load_image
+from src.config import DataConfig
+from src.data.transforms import (
+    get_test_transforms,
+    get_train_transforms,
+    get_val_transforms,
+)
+from src.data.utils import (
+    aggregate_annotations,
+    get_image_dims,
+    load_annotations,
+    load_image,
+)
 
 
 OutputFormat = Literal["torchvision", "yolo"]
@@ -23,8 +31,8 @@ class VinBigDataset(Dataset):
     """
     Dataset for VinBigData Chest X-ray Abnormalities Localization.
 
-    If a prepared dataset (built by src.data.prepare_dataset) exists at
-    <output_root>/prepared_dataset, images are loaded from its pre-converted
+    If a prepared dataset (built by scripts.data.prepare) exists at
+    data/processed, images are loaded from its pre-converted
     16-bit PNGs (fast, shared by all models). Otherwise falls back to reading
     raw DICOMs on the fly.
 
@@ -51,6 +59,9 @@ class VinBigDataset(Dataset):
         image_ids: Optional[list[str]] = None,
         prepared_dataset_root: str | Path | None = None,
     ) -> None:
+        if prepared_dataset_root is None:
+            prepared_dataset_root = cfg.processed_root
+
         self.root = Path(root)
         self.split = split
         self.cfg = cfg
@@ -203,8 +214,8 @@ class VinBigDataset(Dataset):
     def __len__(self) -> int:
         return len(self.image_ids)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
-        image_id = self.image_ids[idx]
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, dict]:
+        image_id = self.image_ids[index]
 
         image = self._load_image(image_id)  # uint8 BGR (H, W, 3)
         boxes_norm, labels = self._get_annotations(image_id)  # normalized xyxy
@@ -243,7 +254,9 @@ class VinBigDataset(Dataset):
 
         if len(abs_boxes) > 0:
             # Map labels to contiguous indices (handles 1-class collapsing)
-            mapped_labels = [app_config.CLASS_ID_TO_IDX.get(int(l), 0) for l in labels_list]
+            mapped_labels = [
+                app_config.CLASS_ID_TO_IDX.get(int(label), 0) for label in labels_list
+            ]
             boxes_t = torch.as_tensor(abs_boxes, dtype=torch.float32)
             labels_t = torch.as_tensor(mapped_labels, dtype=torch.long)
         else:
@@ -271,6 +284,7 @@ class VinBigDataset(Dataset):
 # Collate functions
 # ---------------------------------------------------------------------------
 
+
 def collate_torchvision(batch: list) -> tuple[list[torch.Tensor], list[dict]]:
     """Collate for Faster R-CNN / DETR — returns list of images and list of targets."""
     images, targets = zip(*batch)
@@ -286,6 +300,7 @@ def collate_yolo(batch: list) -> tuple[torch.Tensor, list[dict]]:
 # ---------------------------------------------------------------------------
 # DataLoader factory
 # ---------------------------------------------------------------------------
+
 
 def build_dataloader(
     root: str | Path,

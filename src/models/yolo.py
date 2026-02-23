@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src.config import NUM_CLASSES, DataConfig, ModelConfig
+from src.config import DataConfig, ModelConfig
 from src.models.base import BaseDetector, Detection
 
 
@@ -48,7 +48,9 @@ class YOLODetector(BaseDetector):
         self.output_dir = model_cfg.output_path
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        size = model_cfg.backbone_size if model_cfg.backbone_size in _YOLO_WEIGHTS else "s"
+        size = (
+            model_cfg.backbone_size if model_cfg.backbone_size in _YOLO_WEIGHTS else "s"
+        )
         weights = _YOLO_WEIGHTS[size]
         self.model = YOLO(weights)
 
@@ -58,18 +60,19 @@ class YOLODetector(BaseDetector):
 
     def _prepare_yolo_dataset(self) -> Path:
         """
-        Delegates to src.data.prepare_dataset.prepare_dataset so that the
-        on-disk PNG + label layout is shared with Faster R-CNN and DETR.
-
-        Returns the path to dataset.yaml expected by Ultralytics.
+        Retrieves the pre-generated dataset.yaml from the prepared dataset directory.
+        Assuming dataset is already prepared via step 1.
         """
-        from src.data.prepare_dataset import prepare_dataset
+        # Use processed_root from DataConfig
+        dataset_root = Path(self.data_cfg.processed_root)
+        yaml_path = dataset_root / "dataset.yaml"
 
-        dataset_root = prepare_dataset(
-            data_cfg=self.data_cfg,
-            output_root=self.model_cfg.output_path.parent,
-        )
-        return dataset_root / "dataset.yaml"
+        if not yaml_path.exists():
+            raise FileNotFoundError(
+                f"Prepared dataset not found at {dataset_root}. Run preprocessing first."
+            )
+
+        return yaml_path
 
     # ------------------------------------------------------------------
     # BaseDetector interface
@@ -103,6 +106,23 @@ class YOLODetector(BaseDetector):
             exist_ok=True,
             verbose=True,
             cache="disk",
+            # --- AUGMENTATIONS FOR MEDICAL IMAGING ---
+            hsv_h=0.0,  # Disable hue shift (chest xrays are pseudo-grayscale)
+            hsv_s=0.0,  # Disable saturation shift
+            hsv_v=0.2,  # Minor brightness shift
+            degrees=10.0,  # Small rotation
+            translate=0.1,  # Minor translation
+            scale=0.1,  # Minor scaling
+            shear=0.0,  # Disable shear (distorts medical shapes)
+            perspective=0.0,  # Disable perspective
+            flipud=0.0,  # NEVER flip medical images vertically
+            fliplr=0.5,  # Horizontal flip is mostly okay for localization, but
+            # caution if detecting heart-specific size on the left.
+            # For Abnormality 1-class, 0.5 is standard.
+            mosaic=1.0,  # Enable Mosaic (excellent for small nodules)
+            mixup=0.1,  # Light Mixup
+            copy_paste=0.0,  # Disable copy-paste for medical
+            erasing=0.0,  # Disable cutout/erasing (might erase the only nodule)
         )
 
         # Point model to best weights
@@ -126,7 +146,7 @@ class YOLODetector(BaseDetector):
         import cv2
 
         _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        _IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        _IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
         if isinstance(images, torch.Tensor):
             image_list: list = [images[i] for i in range(images.shape[0])]
@@ -139,8 +159,8 @@ class YOLODetector(BaseDetector):
         converted: list = []
         for img in image_list:
             if isinstance(img, torch.Tensor):
-                arr = img.cpu().numpy()          # CHW float
-                arr = arr.transpose(1, 2, 0)     # HWC
+                arr = img.cpu().numpy()  # CHW float
+                arr = arr.transpose(1, 2, 0)  # HWC
                 arr = arr * _IMAGENET_STD + _IMAGENET_MEAN
                 arr = (arr * 255).clip(0, 255).astype(np.uint8)
                 arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
@@ -171,6 +191,7 @@ class YOLODetector(BaseDetector):
 
     def load(self, path: str | Path) -> None:
         from ultralytics import YOLO
+
         self.model = YOLO(str(path))
 
     def export(self, format: str = "onnx", path: str | Path | None = None) -> Path:

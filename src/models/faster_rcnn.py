@@ -74,7 +74,11 @@ class FasterRCNNDetector(BaseDetector):
         self.output_dir = model_cfg.output_path
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.device = torch.device(model_cfg.device if torch.cuda.is_available() or model_cfg.device == "cpu" else "cpu")
+        self.device = torch.device(
+            model_cfg.device
+            if torch.cuda.is_available() or model_cfg.device == "cpu"
+            else "cpu"
+        )
         self.model = _build_model(model_cfg.backbone_size, NUM_CLASSES).to(self.device)
 
     # ------------------------------------------------------------------
@@ -96,7 +100,9 @@ class FasterRCNNDetector(BaseDetector):
             optimizer,
             T_max=self.model_cfg.epochs,
         )
-        scaler = torch.cuda.amp.GradScaler(enabled=self.model_cfg.amp and self.device.type == "cuda")
+        scaler = torch.cuda.amp.GradScaler(
+            enabled=self.model_cfg.amp and self.device.type == "cuda"
+        )
 
         best_loss = float("inf")
         best_path = self.output_dir / "best.pt"
@@ -106,8 +112,10 @@ class FasterRCNNDetector(BaseDetector):
             val_loss = self._val_epoch(val_loader, epoch)
             scheduler.step()
 
-            print(f"[FasterRCNN] Epoch {epoch}/{self.model_cfg.epochs} — "
-                  f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}")
+            print(
+                f"[FasterRCNN] Epoch {epoch}/{self.model_cfg.epochs} — "
+                f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}"
+            )
 
             if val_loss < best_loss:
                 best_loss = val_loss
@@ -142,14 +150,19 @@ class FasterRCNNDetector(BaseDetector):
                 continue
 
             optimizer.zero_grad()
-            with torch.cuda.amp.autocast(enabled=self.model_cfg.amp and self.device.type == "cuda"):
+            with torch.amp.autocast(
+                device_type=self.device.type,
+                enabled=self.model_cfg.amp and self.device.type == "cuda",
+            ):
                 loss_dict = self.model(images_with_ann, targets_dev)
                 loss = sum(loss_dict.values())
 
             scaler.scale(loss).backward()
             if self.model_cfg.grad_clip > 0:
                 scaler.unscale_(optimizer)
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.model_cfg.grad_clip)
+                nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.model_cfg.grad_clip
+                )
             scaler.step(optimizer)
             scaler.update()
 
@@ -160,6 +173,7 @@ class FasterRCNNDetector(BaseDetector):
     def _val_epoch(self, loader: DataLoader, epoch: int) -> float:
         self.model.train()  # keep in train mode to compute losses
         total_loss = 0.0
+        saved_preview = False
 
         with torch.no_grad():
             for images, targets in loader:
@@ -179,7 +193,33 @@ class FasterRCNNDetector(BaseDetector):
                 if not images_with_ann:
                     continue
 
-                with torch.cuda.amp.autocast(enabled=self.model_cfg.amp and self.device.type == "cuda"):
+                if not saved_preview:
+                    saved_preview = True
+                    self.model.eval()
+                    preds = self.predict(
+                        [images_with_ann[0]], image_size=self.data_cfg.image_size
+                    )
+                    self.model.train()
+
+                    from src.visualize import draw_and_save_preview
+
+                    save_path = (
+                        self.output_dir / "val_previews" / f"epoch_{epoch:03d}.jpg"
+                    )
+                    orig_target = [t for t in targets if len(t["boxes"]) > 0][0]
+                    draw_and_save_preview(
+                        image_tensor=images_with_ann[0],
+                        pred_detection=preds[0],
+                        target_boxes=orig_target["boxes"],
+                        target_labels=orig_target["labels"],
+                        save_path=save_path,
+                        image_size=self.data_cfg.image_size,
+                    )
+
+                with torch.amp.autocast(
+                    device_type=self.device.type,
+                    enabled=self.model_cfg.amp and self.device.type == "cuda",
+                ):
                     loss_dict = self.model(images_with_ann, targets_dev)
                     loss = sum(loss_dict.values())
 
@@ -208,7 +248,7 @@ class FasterRCNNDetector(BaseDetector):
 
         detections: list[Detection] = []
         for out in outputs:
-            boxes = out["boxes"].cpu().numpy()   # absolute xyxy
+            boxes = out["boxes"].cpu().numpy()  # absolute xyxy
             scores = out["scores"].cpu().numpy()
             labels = out["labels"].cpu().numpy().astype(np.int32)
 

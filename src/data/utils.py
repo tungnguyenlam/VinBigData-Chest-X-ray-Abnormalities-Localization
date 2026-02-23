@@ -16,6 +16,7 @@ from src.config import NO_FINDING_CLASS_ID
 # DICOM → numpy
 # ---------------------------------------------------------------------------
 
+
 def _read_dicom_pixels(path: str | Path) -> tuple[np.ndarray, object]:
     """
     Read a DICOM file and return (float32 pixel array after VOI LUT, pydicom dataset).
@@ -26,11 +27,15 @@ def _read_dicom_pixels(path: str | Path) -> tuple[np.ndarray, object]:
 
     try:
         from pydicom.pixel_data_handlers.util import apply_voi_lut
+
         arr = apply_voi_lut(arr, ds)
     except Exception:
         pass
 
-    if hasattr(ds, "PhotometricInterpretation") and ds.PhotometricInterpretation == "MONOCHROME1":
+    if (
+        hasattr(ds, "PhotometricInterpretation")
+        and ds.PhotometricInterpretation == "MONOCHROME1"
+    ):
         arr = arr.max() - arr
 
     return arr, ds
@@ -74,6 +79,50 @@ def dicom_to_array_16bit(path: str | Path, apply_clahe: bool = True) -> np.ndarr
         arr = clahe.apply(arr)
 
     return arr  # single-channel uint16 (H, W)
+
+
+def dicom_to_3channel_8bit(
+    path: str | Path, image_size: int | None = None
+) -> np.ndarray:
+    """
+    Read DICOM, apply VOI LUT, and build a 3-channel 8-bit image for dual-phase training.
+    Ch1: Standard Window (baseline)
+    Ch2: CLAHE (local contrast)
+    Ch3: Unsharp Masking (edge enhancement)
+    """
+    arr, ds = _read_dicom_pixels(path)
+
+    # Normalize to [0, 1] based on percentiles to handle outliers
+    lower_val = np.percentile(arr, 0.5)
+    upper_val = np.percentile(arr, 99.5)
+    if upper_val > lower_val:
+        arr_f32 = np.clip(arr, lower_val, upper_val)
+        arr_f32 = (arr_f32 - lower_val) / (upper_val - lower_val)
+    else:
+        arr_f32 = np.zeros_like(arr, dtype=np.float32)
+
+    if image_size:
+        # Resize here to save CPU on CLAHE and Blur
+        arr_f32 = cv2.resize(
+            arr_f32, (image_size, image_size), interpolation=cv2.INTER_AREA
+        )
+
+    # Channel 1: Standard Window (0-255 uint8)
+    ch1 = (arr_f32 * 255.0).astype(np.uint8)
+
+    # Channel 2: CLAHE on 16-bit, then down to 8-bit
+    arr16 = (arr_f32 * 65535.0).astype(np.uint16)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    ch2_16 = clahe.apply(arr16)
+    ch2 = (ch2_16 / 65535.0 * 255.0).astype(np.uint8)
+
+    # Channel 3: Unsharp Masking
+    blurred = cv2.GaussianBlur(arr_f32, (0, 0), 3)
+    ch3_f32 = np.clip(arr_f32 * 1.5 - blurred * 0.5, 0.0, 1.0)
+    ch3 = (ch3_f32 * 255.0).astype(np.uint8)
+
+    # Stack to (H, W, 3)
+    return np.stack([ch1, ch2, ch3], axis=-1)
 
 
 def convert_uint16_to_uint8(
@@ -130,12 +179,15 @@ def load_image(path: str | Path, size: int, apply_clahe: bool = True) -> np.ndar
 # Annotation loading & WBF consensus
 # ---------------------------------------------------------------------------
 
+
 def load_annotations(csv_path: str | Path) -> pd.DataFrame:
     """Load train.csv, drop 'No finding' rows, return clean dataframe."""
     df = pd.read_csv(str(csv_path))
     df = df[df["class_id"] != NO_FINDING_CLASS_ID].copy()
     df = df.dropna(subset=["x_min", "y_min", "x_max", "y_max"])
-    df[["x_min", "y_min", "x_max", "y_max"]] = df[["x_min", "y_min", "x_max", "y_max"]].astype(float)
+    df[["x_min", "y_min", "x_max", "y_max"]] = df[
+        ["x_min", "y_min", "x_max", "y_max"]
+    ].astype(float)
     return df
 
 
@@ -165,7 +217,11 @@ def wbf_single_image(
     from ensemble_boxes import weighted_boxes_fusion
 
     if not boxes_list:
-        return np.zeros((0, 4), dtype=np.float32), np.zeros(0, dtype=np.float32), np.zeros(0, dtype=np.int32)
+        return (
+            np.zeros((0, 4), dtype=np.float32),
+            np.zeros(0, dtype=np.float32),
+            np.zeros(0, dtype=np.int32),
+        )
 
     fused_boxes, fused_scores, fused_labels = weighted_boxes_fusion(
         boxes_list,
@@ -210,10 +266,10 @@ def aggregate_annotations(
         b[:, [1, 3]] /= orig_h
         b = np.clip(b, 0.0, 1.0)
         s = np.ones(len(b), dtype=np.float32)
-        l = rad_rows["class_id"].values.astype(np.float32)
+        labels = rad_rows["class_id"].values.astype(np.float32)
         boxes_list.append(b.tolist())
         scores_list.append(s.tolist())
-        labels_list.append(l.tolist())
+        labels_list.append(labels.tolist())
 
     fused_boxes, _, fused_labels = wbf_single_image(
         boxes_list, scores_list, labels_list, iou_thr=iou_thr
@@ -224,6 +280,7 @@ def aggregate_annotations(
 # ---------------------------------------------------------------------------
 # YOLO label writer
 # ---------------------------------------------------------------------------
+
 
 def write_yolo_labels(
     image_id: str,
@@ -249,7 +306,7 @@ def write_yolo_labels(
     for box, cls in zip(boxes, labels):
         # Map class_id to contiguous index (handles 14 -> 1 collapsing if LOCALIZE_ONLY)
         cls_idx = app_config.CLASS_ID_TO_IDX.get(int(cls), 0)
-        
+
         x1, y1, x2, y2 = box
         cx = (x1 + x2) / 2
         cy = (y1 + y2) / 2
@@ -305,38 +362,50 @@ def build_yolo_dataset(
 
         rows = ann_lookup.get(img_id, [])
         if not rows:
-            write_yolo_labels(img_id, np.zeros((0, 4), dtype=np.float32), np.zeros(0, dtype=np.int32), label_dir)
+            write_yolo_labels(
+                img_id,
+                np.zeros((0, 4), dtype=np.float32),
+                np.zeros(0, dtype=np.int32),
+                label_dir,
+            )
             return
 
         # Rebuild per-radiologist groups from the lookup dict
         from collections import defaultdict
+
         rad_groups: dict[str, list] = defaultdict(list)
         for cls_id, rad_id, x1, y1, x2, y2 in rows:
             rad_groups[rad_id].append((cls_id, x1, y1, x2, y2))
 
         boxes_list, scores_list, labels_list = [], [], []
         for rad_id, entries in rad_groups.items():
-            b = np.array([[x1, y1, x2, y2] for _, x1, y1, x2, y2 in entries], dtype=np.float32)
+            b = np.array(
+                [[x1, y1, x2, y2] for _, x1, y1, x2, y2 in entries], dtype=np.float32
+            )
             b[:, [0, 2]] /= orig_w
             b[:, [1, 3]] /= orig_h
             b = np.clip(b, 0.0, 1.0)
             s = np.ones(len(b), dtype=np.float32)
-            l = np.array([cls_id for cls_id, *_ in entries], dtype=np.float32)
+            labels = np.array([cls_id for cls_id, *_ in entries], dtype=np.float32)
             boxes_list.append(b.tolist())
             scores_list.append(s.tolist())
-            labels_list.append(l.tolist())
+            labels_list.append(labels.tolist())
 
-        fused_boxes, _, fused_labels = wbf_single_image(boxes_list, scores_list, labels_list, iou_thr=iou_thr)
+        fused_boxes, _, fused_labels = wbf_single_image(
+            boxes_list, scores_list, labels_list, iou_thr=iou_thr
+        )
         write_yolo_labels(img_id, fused_boxes, fused_labels.astype(np.int32), label_dir)
 
     n_workers = os.cpu_count() or 4
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
         if verbose:
-            list(tqdm(
-                executor.map(process_one, image_ids),
-                total=len(image_ids),
-                desc="Writing YOLO labels",
-            ))
+            list(
+                tqdm(
+                    executor.map(process_one, image_ids),
+                    total=len(image_ids),
+                    desc="Writing YOLO labels",
+                )
+            )
         else:
             list(executor.map(process_one, image_ids))
 
