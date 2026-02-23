@@ -1,0 +1,31 @@
+# Core deep learning
+torch>=2.2.0
+torchvision>=0.17.0
+
+# YOLOv8
+ultralytics>=8.2.0
+
+# Transformer-based detection (DETR)
+transformers>=4.40.0
+
+# DICOM reading
+pydicom>=2.4.0
+
+# Image processing
+opencv-python>=4.9.0
+albumentations>=1.4.0
+
+# Box fusion for stacking ensemble
+ensemble-boxes>=1.0.9
+
+# Data
+pandas>=2.0.0
+numpy>=1.26.0
+
+# Utilities
+scikit-learn>=1.4.0
+tqdm>=4.66.0
+pyyaml>=6.0.1
+
+# Optional: mAP metric for ensemble weight tuning
+torchmetrics>=1.3.0

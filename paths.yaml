@@ -1,0 +1,16 @@
+# ============================================================
+# Project paths — edit this file to point to your data.
+# ============================================================
+# Local development:
+#   data_root: data
+#
+# Kaggle:
+#   data_root: /kaggle/input/vinbigdata-chest-xray-abnormalities-detection
+#
+# External drive / custom location:
+#   data_root: /Volumes/HP_P900/data/vinbigdata
+
+data_root: data
+
+# Where trained model weights and prediction logs are saved.
+output_root: outputs
