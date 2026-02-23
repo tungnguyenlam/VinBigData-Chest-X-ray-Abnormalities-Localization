@@ -19,7 +19,7 @@ from typing import Iterator
 
 import numpy as np
 import torch
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from src.config import DataConfig, EnsembleConfig, ModelConfig, NUM_CLASSES
 from src.data.dataset import VinBigDataset, build_dataloader
