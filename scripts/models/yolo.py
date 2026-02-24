@@ -159,8 +159,6 @@ class YOLODetector(BaseDetector):
           - a NCHW batch tensor
           - a list of file path strings / numpy arrays
         """
-        import cv2
-
         _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         _IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
@@ -179,7 +177,6 @@ class YOLODetector(BaseDetector):
                 arr = arr.transpose(1, 2, 0)  # HWC
                 arr = arr * _IMAGENET_STD + _IMAGENET_MEAN
                 arr = (arr * 255).clip(0, 255).astype(np.uint8)
-                arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
                 converted.append(arr)
             else:
                 converted.append(img)
