@@ -56,7 +56,12 @@ def main():
     if args.split != "test":
         print(f"Evaluating predictions on {args.split} split...")
         try:
-            metrics = evaluate_predictions(out_path, data_cfg, split=args.split)
+            metrics = evaluate_predictions(
+                out_path,
+                data_cfg,
+                split=args.split,
+                prepared_dataset_root=prepared_dataset_root,
+            )
             for k, v in metrics.items():
                 if isinstance(v, float):
                     print(f"  {k}: {v:.4f}")

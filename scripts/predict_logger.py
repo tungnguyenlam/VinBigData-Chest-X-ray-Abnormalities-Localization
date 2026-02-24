@@ -214,10 +214,15 @@ def evaluate_predictions(
     pred_file: str | Path,
     data_cfg: DataConfig,
     split: Literal["train", "val", "test"] = "val",
+    prepared_dataset_root: str | Path | None = None,
 ) -> dict:
     """
     Compute mAP from a saved JSONL prediction file against ground truth.
     Requires torchmetrics.
+
+    prepared_dataset_root : path to the prepared dataset (data/processed).
+        Must be provided when raw DICOMs are not available locally, so that
+        GT boxes are read from the pre-built YOLO .txt label files instead.
     """
     if MeanAveragePrecision is None:
         raise ImportError("pip install torchmetrics")
@@ -230,6 +235,7 @@ def evaluate_predictions(
         cfg=data_cfg,
         output_format="torchvision",
         shuffle=False,
+        prepared_dataset_root=prepared_dataset_root,
     )
 
     metric: Any = MeanAveragePrecision(box_format="xyxy", iou_type="bbox")
