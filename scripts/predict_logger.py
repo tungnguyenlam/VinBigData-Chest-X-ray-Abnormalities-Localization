@@ -101,6 +101,10 @@ def predict_and_log(
     Run model inference over the entire split, writing each prediction
     immediately to disk.  Uses batch_size=1 by default to minimise peak RAM.
 
+    When the model supports `predict_from_paths` (e.g. YOLO), images are
+    passed as file paths directly — avoiding the lossy normalize/denormalize
+    round-trip and matching training-time preprocessing exactly.
+
     prepared_dataset_root : path to the output of prepare_dataset.py
         (e.g. "data/processed").  When provided, images are loaded
         from pre-converted 16-bit PNGs instead of raw DICOMs.
@@ -109,6 +113,33 @@ def predict_and_log(
     """
     output_path = Path(output_path)
 
+    # --- Direct path mode (YOLO) ---
+    if hasattr(model, "predict_from_paths"):
+        from scripts.data.dataset import VinBigDataset
+
+        dataset = VinBigDataset(
+            root=data_cfg.root,
+            split=split,
+            cfg=data_cfg,
+            output_format="torchvision",
+            prepared_dataset_root=prepared_dataset_root,
+        )
+        total = len(dataset)
+        print(f"  Predicting {total} images → {output_path} (direct path mode)")
+
+        with PredictionWriter(output_path) as writer:
+            for idx in tqdm(range(total), desc="predict"):
+                img_id = dataset.image_ids[idx]
+                img_path = dataset._resolve_image_path(img_id)
+                dets = model.predict_from_paths(
+                    [img_path], image_size=data_cfg.image_size
+                )
+                filtered = dets[0].filter_by_score(score_threshold)
+                writer.write(img_id, filtered)
+
+        return output_path
+
+    # --- Fallback: dataloader mode (Faster R-CNN, DETR, etc.) ---
     import copy
 
     cfg_1 = copy.copy(data_cfg)

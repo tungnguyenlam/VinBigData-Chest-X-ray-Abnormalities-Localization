@@ -197,6 +197,33 @@ class YOLODetector(BaseDetector):
 
         return detections
 
+    def predict_from_paths(
+        self,
+        paths: list[str | Path],
+        image_size: int = 640,
+    ) -> list[Detection]:
+        """
+        Run inference directly from file paths — no normalize/denormalize
+        round-trip.  Ultralytics reads and preprocesses images natively,
+        matching exactly what it does during training validation.
+        """
+        str_paths = [str(p) for p in paths]
+        results = self.model(str_paths, imgsz=image_size, verbose=False)
+
+        detections: list[Detection] = []
+        for r in results:
+            if r.boxes is None or len(r.boxes) == 0:
+                detections.append(Detection())
+                continue
+
+            boxes_xyxy = r.boxes.xyxyn.cpu().numpy()  # normalized xyxy
+            scores = r.boxes.conf.cpu().numpy()
+            labels = r.boxes.cls.cpu().numpy().astype(np.int32)
+
+            detections.append(Detection(boxes=boxes_xyxy, scores=scores, labels=labels))
+
+        return detections
+
     def save(self, path: str | Path) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
