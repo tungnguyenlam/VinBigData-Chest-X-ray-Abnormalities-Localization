@@ -128,10 +128,12 @@ class FasterRCNNDetector(BaseDetector):
         scaler: torch.cuda.amp.GradScaler,
         epoch: int,
     ) -> float:
+        from tqdm import tqdm
+
         self.model.train()
         total_loss = 0.0
 
-        for images, targets in loader:
+        for images, targets in tqdm(loader, desc=f"Train Epoch {epoch}", leave=False):
             images = [img.to(self.device) for img in images]
             targets_dev = [
                 {
@@ -171,12 +173,14 @@ class FasterRCNNDetector(BaseDetector):
         return total_loss / max(1, len(loader))
 
     def _val_epoch(self, loader: DataLoader, epoch: int) -> float:
+        from tqdm import tqdm
+
         self.model.train()  # keep in train mode to compute losses
         total_loss = 0.0
         saved_preview = False
 
         with torch.no_grad():
-            for images, targets in loader:
+            for images, targets in tqdm(loader, desc=f"Val Epoch {epoch}", leave=False):
                 images = [img.to(self.device) for img in images]
                 targets_dev = [
                     {

@@ -19,7 +19,7 @@ python scripts/models/train_yolo.py --data /kaggle/input/vinbigdata-chest-xray-a
 python scripts/models/train_yolo.py --preset large --epochs 50 --device cuda:0
 
 # Skip training, just run predictions from existing weights
-python scripts/models/train_yolo.py --predict_only outputs/yolo/train/weights/best.pt --prepared_dataset data/processed
+# python scripts/models/train_yolo.py --predict_only outputs/yolo/train/weights/best.pt --prepared_dataset data/processed
 """
 
 from __future__ import annotations
@@ -139,11 +139,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--localize_only",
-        action="store_true",
-        help="Collapse all 14 abnormality classes into a single 'Abnormality' class.",
-    )
-    parser.add_argument(
         "--image_size",
         type=int,
         default=None,
@@ -175,28 +170,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Device: cpu | cuda | cuda:0 | mps. Overrides the preset default.",
     )
-    parser.add_argument(
-        "--predict_only",
-        type=str,
-        default=None,
-        metavar="WEIGHTS_PATH",
-        help=(
-            "Skip training. Load weights from this .pt path and run "
-            "predictions on the val split, saving to JSONL."
-        ),
-    )
-    parser.add_argument(
-        "--pred_batch",
-        type=int,
-        default=1,
-        help="Batch size used during prediction (1 = safest for RAM).",
-    )
-    parser.add_argument(
-        "--score_thr",
-        type=float,
-        default=0.0,
-        help="Score threshold when logging predictions (0 = keep all).",
-    )
     return parser.parse_args()
 
 
@@ -205,14 +178,6 @@ def main() -> None:
 
     data_root = args.data or get_data_root()
     output_root = args.output or get_output_root()
-
-    if args.localize_only:
-        from scripts import config
-
-        config.LOCALIZE_ONLY = True
-        config.NUM_CLASSES = 1
-        config.CLASS_NAMES = ["Abnormality"]
-        config.CLASS_ID_TO_IDX = {i: 0 for i in range(14)}
 
     # Resolve default model size from preset, then allow override
     preset_default_size = {"small": "n", "medium": "s", "large": "l"}[args.preset]
@@ -262,32 +227,6 @@ def main() -> None:
         print(f"  prepared dataset : {prepared_dataset_root}\n")
 
     # ------------------------------------------------------------------
-    # Predict-only mode
-    # ------------------------------------------------------------------
-    if args.predict_only:
-        weights_path = Path(args.predict_only)
-        if not weights_path.exists():
-            print(f"ERROR: weights file not found: {weights_path}")
-            sys.exit(1)
-
-        print(f"Predict-only mode — loading weights from {weights_path}")
-        detector = YOLODetector(data_cfg, model_cfg)
-        detector.load(weights_path)
-
-        pred_path = Path(output_root) / "yolo" / "predictions_val.jsonl"
-        predict_and_log(
-            model=detector,
-            data_cfg=data_cfg,
-            split="val",
-            output_path=pred_path,
-            score_threshold=args.score_thr,
-            batch_size=args.pred_batch,
-            prepared_dataset_root=prepared_dataset_root,
-        )
-        print(f"\nPredictions saved → {pred_path}")
-        return
-
-    # ------------------------------------------------------------------
     # Training
     # ------------------------------------------------------------------
     detector = YOLODetector(data_cfg, model_cfg)
@@ -308,8 +247,8 @@ def main() -> None:
         data_cfg=data_cfg,
         split="val",
         output_path=pred_path,
-        score_threshold=args.score_thr,
-        batch_size=args.pred_batch,
+        score_threshold=0.0,
+        batch_size=1,
         prepared_dataset_root=prepared_dataset_root,
     )
 
