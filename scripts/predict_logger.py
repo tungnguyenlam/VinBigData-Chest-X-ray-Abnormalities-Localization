@@ -240,21 +240,57 @@ def evaluate_predictions(
 
     metric: Any = MeanAveragePrecision(box_format="xyxy", iou_type="bbox")
 
+    # --- Diagnostics ---
+    n_total = 0
+    n_pred_empty = 0
+    n_gt_empty = 0
+    n_both_nonempty = 0
+    diag_printed = 0
+
     for _, targets in loader:
         for target in targets:
             img_id = target["image_id"]
             det = preds_dict.get(img_id, Detection())
 
+            # Fix empty box shape: (0,) → (0, 4)
+            pred_boxes = det.boxes
+            if pred_boxes.ndim == 1 and len(pred_boxes) == 0:
+                pred_boxes = pred_boxes.reshape(0, 4)
+
+            pred_boxes_abs = pred_boxes * data_cfg.image_size
+
             pred_fmt = {
-                "boxes": torch.tensor(det.boxes * data_cfg.image_size),
-                "scores": torch.tensor(det.scores),
-                "labels": torch.tensor(det.labels, dtype=torch.long),
+                "boxes": torch.as_tensor(pred_boxes_abs, dtype=torch.float32),
+                "scores": torch.as_tensor(det.scores, dtype=torch.float32),
+                "labels": torch.as_tensor(det.labels, dtype=torch.long),
             }
             gt_fmt = {
                 "boxes": target["boxes"],
                 "labels": target["labels"],
             }
+
+            n_total += 1
+            if len(det.scores) == 0:
+                n_pred_empty += 1
+            if len(target["boxes"]) == 0:
+                n_gt_empty += 1
+            if len(det.scores) > 0 and len(target["boxes"]) > 0:
+                n_both_nonempty += 1
+                if diag_printed < 3:
+                    diag_printed += 1
+                    print(f"  [DIAG] image={img_id}")
+                    print(f"    pred boxes (abs): {pred_boxes_abs[:2].tolist()}")
+                    print(f"    pred scores:      {det.scores[:2].tolist()}")
+                    print(f"    pred labels:      {det.labels[:2].tolist()}")
+                    print(f"    gt   boxes:       {target['boxes'][:2].tolist()}")
+                    print(f"    gt   labels:      {target['labels'][:2].tolist()}")
+
             metric.update(preds=[pred_fmt], target=[gt_fmt])
+
+    print(
+        f"  [DIAG] total={n_total} pred_empty={n_pred_empty} "
+        f"gt_empty={n_gt_empty} both_nonempty={n_both_nonempty}"
+    )
 
     result: dict = metric.compute()
     return {k: float(v.item()) if hasattr(v, "item") else v for k, v in result.items()}
