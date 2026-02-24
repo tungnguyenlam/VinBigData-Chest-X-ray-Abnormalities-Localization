@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -61,11 +62,39 @@ def main():
             split=args.split,
             prepared_dataset_root=prepared_dataset_root,
         )
+
+        # Print with explicit mAP50-95 label
+        display_names = {
+            "map": "mAP@50-95",
+            "map_50": "mAP@50",
+            "map_75": "mAP@75",
+        }
+        print("\n  === Results ===")
+        for k, v in metrics.items():
+            label = display_names.get(k, k)
+            if isinstance(v, float):
+                print(f"  {label}: {v:.4f}")
+            else:
+                print(f"  {label}: {v}")
+
+        # Save metrics to JSON
+        metrics_path = out_path.with_suffix(".metrics.json")
+        serializable = {}
         for k, v in metrics.items():
             if isinstance(v, float):
-                print(f"  {k}: {v:.4f}")
+                serializable[k] = round(v, 6)
+            elif isinstance(v, (int, str, bool)):
+                serializable[k] = v
             else:
-                print(f"  {k}: {v}")
+                serializable[k] = str(v)
+        serializable["split"] = args.split
+        serializable["weights"] = args.weights
+        serializable["score_threshold"] = args.score_thr
+
+        with open(metrics_path, "w") as f:
+            json.dump(serializable, f, indent=2)
+        print(f"\n  Metrics saved to {metrics_path}")
+
     except Exception as e:
         print(f"Evaluation failed: {e}")
 
