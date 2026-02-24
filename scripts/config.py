@@ -164,7 +164,6 @@ class HardwarePreset:
             data=DataConfig(
                 root=root,
                 processed_root=get_processed_data_root(),
-                image_size=640,
                 batch_size=4,
                 num_workers=0,
                 cache_images=False,
@@ -192,7 +191,6 @@ class HardwarePreset:
             data=DataConfig(
                 root=root,
                 processed_root=get_processed_data_root(),
-                image_size=640,
                 batch_size=8,
                 num_workers=4,
                 cache_images=False,
@@ -220,7 +218,6 @@ class HardwarePreset:
             data=DataConfig(
                 root=root,
                 processed_root=get_processed_data_root(),
-                image_size=1024,
                 batch_size=16,
                 num_workers=8,
                 cache_images=False,
