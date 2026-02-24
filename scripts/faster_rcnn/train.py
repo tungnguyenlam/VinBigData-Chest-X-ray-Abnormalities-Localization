@@ -55,6 +55,13 @@ def main():
         dest="num_workers",
         help="Number of DataLoader workers. Overrides the preset default.",
     )
+    parser.add_argument(
+        "--backbone",
+        type=str,
+        default=None,
+        choices=["resnet50", "resnet50v2", "resnet101"],
+        help="Backbone architecture.",
+    )
     args = parser.parse_args()
 
     # Resolve roots
@@ -82,6 +89,8 @@ def main():
         data_cfg.batch_size = args.batch_size
     if args.num_workers is not None:
         data_cfg.num_workers = args.num_workers
+    if args.backbone is not None:
+        model_cfg.backbone_size = args.backbone
     data_cfg.include_no_finding = args.include_no_finding
     model_cfg.output_dir = output_root
 
