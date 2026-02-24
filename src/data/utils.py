@@ -352,16 +352,23 @@ def write_yolo_yaml(
     val_img_dir: str | Path,
     class_names: list[str],
     test_img_dir: str | Path | None = None,
+    dataset_path: str | Path | None = None,
 ) -> None:
     """Write a dataset YAML file for Ultralytics YOLO."""
     import yaml
 
-    data = {
-        "train": str(train_img_dir),
-        "val": str(val_img_dir),
-        "nc": len(class_names),
-        "names": class_names,
-    }
+    data = {}
+    if dataset_path:
+        data["path"] = str(dataset_path)
+
+    data.update(
+        {
+            "train": str(train_img_dir),
+            "val": str(val_img_dir),
+            "nc": len(class_names),
+            "names": class_names,
+        }
+    )
     if test_img_dir:
         data["test"] = str(test_img_dir)
     yaml_path = Path(yaml_path)

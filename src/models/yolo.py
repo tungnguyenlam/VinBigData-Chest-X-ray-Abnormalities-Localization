@@ -90,40 +90,56 @@ class YOLODetector(BaseDetector):
         """
         yaml_path = self._prepare_yolo_dataset()
 
-        self.model.train(
-            data=str(yaml_path),
-            epochs=self.model_cfg.epochs,
-            imgsz=self.data_cfg.image_size,
-            batch=self.data_cfg.batch_size,
-            workers=self.data_cfg.num_workers,
-            device=self.model_cfg.device,
-            amp=self.model_cfg.amp,
-            lr0=self.model_cfg.lr,
-            weight_decay=self.model_cfg.weight_decay,
-            warmup_epochs=self.model_cfg.warmup_epochs,
-            project=str(self.output_dir),
-            name="train",
-            exist_ok=True,
-            verbose=True,
-            cache="disk",
-            # --- AUGMENTATIONS FOR MEDICAL IMAGING ---
-            hsv_h=0.0,  # Disable hue shift (chest xrays are pseudo-grayscale)
-            hsv_s=0.0,  # Disable saturation shift
-            hsv_v=0.2,  # Minor brightness shift
-            degrees=10.0,  # Small rotation
-            translate=0.1,  # Minor translation
-            scale=0.1,  # Minor scaling
-            shear=0.0,  # Disable shear (distorts medical shapes)
-            perspective=0.0,  # Disable perspective
-            flipud=0.0,  # NEVER flip medical images vertically
-            fliplr=0.5,  # Horizontal flip is mostly okay for localization, but
-            # caution if detecting heart-specific size on the left.
-            # For Abnormality 1-class, 0.5 is standard.
-            mosaic=1.0,  # Enable Mosaic (excellent for small nodules)
-            mixup=0.1,  # Light Mixup
-            copy_paste=0.0,  # Disable copy-paste for medical
-            erasing=0.0,  # Disable cutout/erasing (might erase the only nodule)
-        )
+        # Monkey-patch ultralytics.YOLO to prevent the internal AMP check
+        # from downloading 'yolo26n.pt', forcing it to use 'yolov8n.pt' instead.
+        import ultralytics
+
+        orig_yolo = ultralytics.YOLO
+
+        class PatchedYOLO(orig_yolo):
+            def __init__(self, model="yolo26n.pt", *args, **kwargs):
+                if str(model).endswith("yolo26n.pt"):
+                    model = "yolov8n.pt"  # Redirect to YOLOv8
+                super().__init__(model, *args, **kwargs)
+
+        ultralytics.YOLO = PatchedYOLO
+
+        try:
+            self.model.train(
+                data=str(yaml_path),
+                epochs=self.model_cfg.epochs,
+                imgsz=self.data_cfg.image_size,
+                batch=self.data_cfg.batch_size,
+                workers=self.data_cfg.num_workers,
+                device=self.model_cfg.device,
+                amp=self.model_cfg.amp,
+                lr0=self.model_cfg.lr,
+                weight_decay=self.model_cfg.weight_decay,
+                warmup_epochs=self.model_cfg.warmup_epochs,
+                project=str(self.output_dir),
+                name="train",
+                exist_ok=True,
+                verbose=True,
+                cache="disk",
+                # --- AUGMENTATIONS FOR MEDICAL IMAGING ---
+                hsv_h=0.0,
+                hsv_s=0.0,
+                hsv_v=0.2,
+                degrees=10.0,
+                translate=0.1,
+                scale=0.1,
+                shear=0.0,
+                perspective=0.0,
+                flipud=0.0,
+                fliplr=0.5,
+                mosaic=1.0,
+                mixup=0.1,
+                copy_paste=0.0,
+                erasing=0.0,
+            )
+        finally:
+            # Restore original YOLO
+            ultralytics.YOLO = orig_yolo
 
         # Point model to best weights
         best = self.output_dir / "train" / "weights" / "best.pt"

@@ -302,9 +302,10 @@ def prepare_dataset(
     # --- dataset.yaml (Ultralytics) ---
     write_yolo_yaml(
         yaml_path=yaml_path,
-        train_img_dir=(dataset_root / "train" / "images").resolve(),
-        val_img_dir=(dataset_root / "val" / "images").resolve(),
-        test_img_dir=(dataset_root / "test" / "images").resolve(),
+        dataset_path=".",
+        train_img_dir="train/images",
+        val_img_dir="val/images",
+        test_img_dir="test/images",
         class_names=_current_class_names(),
     )
 
