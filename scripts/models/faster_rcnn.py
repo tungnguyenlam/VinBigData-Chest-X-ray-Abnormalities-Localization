@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -68,10 +69,12 @@ class FasterRCNNDetector(BaseDetector):
         self,
         data_cfg: DataConfig,
         model_cfg: ModelConfig,
+        run_dir: Path | None = None,
     ) -> None:
         self.data_cfg = data_cfg
         self.model_cfg = model_cfg
-        self.output_dir = model_cfg.output_path
+        # run_dir takes priority; fall back to model_cfg.output_path
+        self.output_dir: Path = run_dir if run_dir is not None else model_cfg.output_path
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.device = torch.device(
@@ -89,7 +92,16 @@ class FasterRCNNDetector(BaseDetector):
         self,
         train_loader: DataLoader,
         val_loader: DataLoader,
-    ) -> None:
+    ) -> list[dict]:
+        """
+        Train for ``model_cfg.epochs`` epochs.
+
+        Returns
+        -------
+        list[dict]
+            Per-epoch records with keys ``epoch``, ``train_loss``, ``val_loss``, ``lr``.
+        """
+
         params = [p for p in self.model.parameters() if p.requires_grad]
         optimizer = torch.optim.AdamW(
             params,
@@ -104,22 +116,61 @@ class FasterRCNNDetector(BaseDetector):
             enabled=self.model_cfg.amp and self.device.type == "cuda"
         )
 
-        best_loss = float("inf")
+        best_val_loss = float("inf")
+        best_epoch = -1
         best_path = self.output_dir / "best.pt"
+        last_path = self.output_dir / "last.pt"
+        history: list[dict] = []
 
         for epoch in range(1, self.model_cfg.epochs + 1):
             train_loss = self._train_epoch(train_loader, optimizer, scaler, epoch)
             val_loss = self._val_epoch(val_loader, epoch)
+            current_lr = scheduler.get_last_lr()[0]
             scheduler.step()
 
+            record = {
+                "epoch": epoch,
+                "train_loss": round(train_loss, 6),
+                "val_loss": round(val_loss, 6),
+                "lr": current_lr,
+            }
+            history.append(record)
+
             print(
-                f"[FasterRCNN] Epoch {epoch}/{self.model_cfg.epochs} — "
-                f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}"
+                f"Epoch {epoch}/{self.model_cfg.epochs}  "
+                f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  lr={current_lr:.2e}"
             )
 
-            if val_loss < best_loss:
-                best_loss = val_loss
+            # -- Always save the latest checkpoint --
+            self.save(last_path)
+            self._save_metadata(
+                last_path.with_suffix(".meta.json"),
+                epoch=epoch,
+                train_loss=train_loss,
+                val_loss=val_loss,
+                tag="last",
+            )
+
+            # -- Save best checkpoint when val_loss improves --
+            if val_loss < best_val_loss:
+                improved = best_val_loss - val_loss
+                best_val_loss = val_loss
+                best_epoch = epoch
                 self.save(best_path)
+                self._save_metadata(
+                    best_path.with_suffix(".meta.json"),
+                    epoch=epoch,
+                    train_loss=train_loss,
+                    val_loss=val_loss,
+                    tag="best",
+                )
+                print(
+                    f"  ✓ New best  val_loss={best_val_loss:.4f}  "
+                    f"(improved by {improved:.4f}, epoch {best_epoch})  → saved best.pt"
+                )
+
+        print(f"Training finished. Best val_loss={best_val_loss:.4f} at epoch {best_epoch}.")
+        return history
 
     def _train_epoch(
         self,
@@ -283,6 +334,29 @@ class FasterRCNNDetector(BaseDetector):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(self.model.state_dict(), path)
+
+    def _save_metadata(
+        self,
+        path: str | Path,
+        epoch: int,
+        train_loss: float,
+        val_loss: float,
+        tag: str = "",
+    ) -> None:
+        """Write a JSON sidecar alongside a checkpoint."""
+        meta = {
+            "tag": tag,
+            "epoch": epoch,
+            "train_loss": round(train_loss, 6),
+            "val_loss": round(val_loss, 6),
+            "backbone": self.model_cfg.backbone_size,
+            "arch": self.model_cfg.arch,
+            "image_size": self.data_cfg.image_size,
+        }
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(meta, f, indent=2)
 
     def load(self, path: str | Path) -> None:
         state = torch.load(str(path), map_location=self.device)
