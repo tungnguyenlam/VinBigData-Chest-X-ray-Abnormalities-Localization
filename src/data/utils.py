@@ -286,8 +286,11 @@ def build_yolo_dataset(
     # Build a plain-Python dict (fully picklable) keyed by image_id
     ann_lookup: dict[str, list] = {}
     for row in sub_df.itertuples(index=False):
+        # Map class_id to contiguous index here so that WBF properly
+        # merges boxes mapped to the same class (like Abnormality=0)
+        cls_idx = app_config.CLASS_ID_TO_IDX.get(int(row.class_id), 0)
         ann_lookup.setdefault(row.image_id, []).append(
-            (row.class_id, row.rad_id, row.x_min, row.y_min, row.x_max, row.y_max)
+            (cls_idx, row.rad_id, row.x_min, row.y_min, row.x_max, row.y_max)
         )
 
     def process_one(img_id: str) -> None:

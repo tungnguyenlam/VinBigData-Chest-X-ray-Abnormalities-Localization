@@ -144,6 +144,12 @@ def parse_args() -> argparse.Namespace:
         help="Collapse all 14 abnormality classes into a single 'Abnormality' class.",
     )
     parser.add_argument(
+        "--image_size",
+        type=int,
+        default=None,
+        help="Image size for training and prediction. Overrides preset default.",
+    )
+    parser.add_argument(
         "--epochs",
         type=int,
         default=None,
@@ -214,14 +220,26 @@ def main() -> None:
 
     data_cfg, model_cfg = build_preset(args.preset, data_root, output_root, model_size)
 
+    if args.image_size is not None:
+        data_cfg.image_size = args.image_size
     if args.epochs is not None:
         model_cfg.epochs = args.epochs
     if args.batch_size is not None:
         data_cfg.batch_size = args.batch_size
     if args.num_workers is not None:
         data_cfg.num_workers = args.num_workers
+
     if args.device is not None:
         model_cfg.device = args.device
+    else:
+        import torch
+
+        if torch.cuda.is_available():
+            model_cfg.device = "cuda"
+        elif torch.backends.mps.is_available():
+            model_cfg.device = "mps"
+        else:
+            model_cfg.device = "cpu"
     data_cfg.include_no_finding = args.include_no_finding
 
     # Optimization for MPS (Apple Silicon)
