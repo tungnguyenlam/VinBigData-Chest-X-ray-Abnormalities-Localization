@@ -6,8 +6,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src.config import EnsembleConfig, NUM_CLASSES
-from src.models.base import BaseDetector, Detection
+from scripts.config import EnsembleConfig, NUM_CLASSES
+from scripts.models.base import BaseDetector, Detection
 
 
 FusionMethod = Literal["wbf", "nms", "soft_nms"]

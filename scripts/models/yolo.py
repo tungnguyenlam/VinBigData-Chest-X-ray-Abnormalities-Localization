@@ -8,8 +8,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src.config import DataConfig, ModelConfig
-from src.models.base import BaseDetector, Detection
+from scripts.config import DataConfig, ModelConfig
+from scripts.models.base import BaseDetector, Detection
 
 
 ModelSize = Literal["n", "s", "m", "l", "x"]
@@ -102,7 +102,7 @@ class YOLODetector(BaseDetector):
                     model = "yolov8n.pt"  # Redirect to YOLOv8
                 super().__init__(model, *args, **kwargs)
 
-        ultralytics.YOLO = PatchedYOLO
+        ultralytics.YOLO = PatchedYOLO  # type: ignore[assignment]
 
         try:
             self.model.train(

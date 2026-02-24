@@ -4,9 +4,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import HardwarePreset
-from src.models.detr import DETRDetector
-from src.predict_logger import predict_and_log
+from scripts.config import HardwarePreset
+from scripts.models.detr import DETRDetector
+from scripts.predict_logger import predict_and_log
 
 def main():
     parser = argparse.ArgumentParser(description="Test DETR on VinBigData.")

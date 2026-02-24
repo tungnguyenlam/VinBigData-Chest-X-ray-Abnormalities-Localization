@@ -2,8 +2,8 @@ import cv2
 import numpy as np
 import torch
 from pathlib import Path
-from src.models.base import Detection
-from src.config import CLASS_NAMES
+from scripts.models.base import Detection
+from scripts.config import CLASS_NAMES
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)

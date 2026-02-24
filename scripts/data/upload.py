@@ -152,6 +152,7 @@ def upload_to_hf(repo_id: str, source_folder: str, chunk_size: int, clean_remote
             repo_id=repo_id,
             repo_type="dataset",
             commit_message=f"Upload zipped dataset (chunks of {chunk_size})",
+            ignore_patterns=["*.npy"],
         )
 
     print(

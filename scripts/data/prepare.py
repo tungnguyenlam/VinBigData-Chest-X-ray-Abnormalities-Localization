@@ -19,16 +19,16 @@ On-disk layout after preparation
 Usage (CLI)
 -----------
 # Default paths from paths.yaml
-python src/data/prepare_dataset.py
+python scripts/data/prepare_dataset.py
 
 # Override paths
-python src/data/prepare_dataset.py --data /path/to/data --output outputs
+python scripts/data/prepare_dataset.py --data /path/to/data --output outputs
 
 # Force full rebuild even if already prepared
-python src/data/prepare_dataset.py --force
+python scripts/data/prepare_dataset.py --force
 
 # Exclude "No finding" images (only abnormality images)
-python src/data/prepare_dataset.py --no_finding false
+python scripts/data/prepare_dataset.py --no_finding false
 """
 
 from __future__ import annotations
@@ -44,13 +44,13 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import (
+from scripts.config import (
     DataConfig,
     get_data_root,
     get_output_root,
     get_processed_data_root,
 )
-from src.data.utils import (
+from scripts.data.utils import (
     build_yolo_dataset,
     load_annotations,
     write_yolo_yaml,
@@ -65,7 +65,7 @@ from src.data.utils import (
 def _convert_worker(args: tuple) -> None:
     """Convert one DICOM to a 3-channel 8-bit PNG in a subprocess."""
     import cv2
-    from src.data.utils import dicom_to_3channel_8bit
+    from scripts.data.utils import dicom_to_3channel_8bit
 
     img_id, src_dir, dst_dir, image_size = args
     src_dicom = Path(src_dir) / f"{img_id}.dicom"
@@ -82,13 +82,13 @@ def _convert_worker(args: tuple) -> None:
 
 
 def _current_class_names() -> list[str]:
-    import src.config as app_config
+    import scripts.config as app_config
 
     return list(app_config.CLASS_NAMES)
 
 
 def _current_localize_only() -> bool:
-    import src.config as app_config
+    import scripts.config as app_config
 
     return bool(app_config.LOCALIZE_ONLY)
 

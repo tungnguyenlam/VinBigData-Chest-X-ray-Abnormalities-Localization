@@ -14,8 +14,8 @@ from torchvision.models.detection import (
 )
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
-from src.config import NUM_CLASSES, DataConfig, ModelConfig
-from src.models.base import BaseDetector, Detection
+from scripts.config import NUM_CLASSES, DataConfig, ModelConfig
+from scripts.models.base import BaseDetector, Detection
 
 
 BackboneSize = Literal["resnet50", "resnet50v2", "resnet101"]
@@ -201,7 +201,7 @@ class FasterRCNNDetector(BaseDetector):
                     )
                     self.model.train()
 
-                    from src.visualize import draw_and_save_preview
+                    from scripts.visualize import draw_and_save_preview
 
                     save_path = (
                         self.output_dir / "val_previews" / f"epoch_{epoch:03d}.jpg"

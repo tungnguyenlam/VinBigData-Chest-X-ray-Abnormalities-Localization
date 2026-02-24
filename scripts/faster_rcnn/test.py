@@ -4,9 +4,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import HardwarePreset
-from src.models.faster_rcnn import FasterRCNNDetector
-from src.predict_logger import predict_and_log
+from scripts.config import HardwarePreset
+from scripts.models.faster_rcnn import FasterRCNNDetector
+from scripts.predict_logger import predict_and_log
 
 def main():
     parser = argparse.ArgumentParser(description="Test Faster R-CNN on VinBigData.")

@@ -4,9 +4,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import HardwarePreset
-from src.data.dataset import build_dataloader
-from src.models.detr import DETRDetector
+from scripts.config import HardwarePreset
+from scripts.data.dataset import build_dataloader
+from scripts.models.detr import DETRDetector
 
 def main():
     parser = argparse.ArgumentParser(description="Train DETR on VinBigData.")

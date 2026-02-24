@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 import pydicom
 
-import src.config as app_config
-from src.config import NO_FINDING_CLASS_ID
+import scripts.config as app_config
+from scripts.config import NO_FINDING_CLASS_ID
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ def dicom_to_3channel_8bit(
     Read DICOM, apply VOI LUT, and build a 3-channel 8-bit image for dual-phase training.
     Ch1: Standard Window (baseline)
     Ch2: CLAHE (local contrast)
-    Ch3: Unsharp Masking (edge enhancement)
+    Ch3: Laplacian Filter (edge enhancement)
     """
     arr, ds = _read_dicom_pixels(path)
 
@@ -93,9 +93,13 @@ def dicom_to_3channel_8bit(
     ch2_16 = clahe.apply(arr16)
     ch2 = (ch2_16 / 65535.0 * 255.0).astype(np.uint8)
 
-    # Channel 3: Unsharp Masking
-    blurred = cv2.GaussianBlur(arr_f32, (0, 0), 3)
-    ch3_f32 = np.clip(arr_f32 * 1.5 - blurred * 0.5, 0.0, 1.0)
+    # Channel 3: Spatial Detail / Edge Enhancement (Laplacian)
+    laplacian = cv2.Laplacian(arr_f32, cv2.CV_32F, ksize=3)
+    lap_min, lap_max = laplacian.min(), laplacian.max()
+    if lap_max > lap_min:
+        ch3_f32 = (laplacian - lap_min) / (lap_max - lap_min)
+    else:
+        ch3_f32 = np.zeros_like(arr_f32)
     ch3 = (ch3_f32 * 255.0).astype(np.uint8)
 
     # Stack to (H, W, 3)

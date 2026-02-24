@@ -21,11 +21,11 @@ Since we are generating 3 channels (Red, Green, Blue) for compatibility anyway, 
 
 * **Channel 1 (Standard Window):** We apply a standard percentile-based linear scaling. This acts as the "baseline" view, preserving global patient anatomy and overall contrast just as a radiologist would see in a standard viewer.
 * **Channel 2 (CLAHE - Contrast Limited Adaptive Histogram Equalization):** We compute the adaptive local contrast algorithm on the raw 16-bit data, map the result down to 8-bits, and store it here. CLAHE aggressively pulls out local textures that are otherwise invisible in extremely bright regions (like the mediastinum) or extremely dark regions (like over-penetrated lung fields).
-* **Channel 3 (Unsharp Masking):** We apply an edge-enhancement filter (blur subtraction). This specifically highlights crisp boundaries, which is medically critical for detecting sharp features like thin pneumothorax pleural lines or dense calcifications.
+* **Channel 3 (Laplacian Filter):** We apply a second-order derivative edge-enhancement filter. This computes the rate of change between adjacent pixels, completely isolating and highlighting high-frequency spatial gradients (edges). This is medically critical for preserving sharp, subtle features like micro-nodules or hairline fractures that would otherwise be destroyed by interpolation blur during resizing.
 
 When the neural network reads this "RGB" image, it is actually reading a stacked feature map of Standard Anatomy, Local Contrast, and Edge Maps all at once.
 
 ### 3. I/O Speed and CPU Bottlenecks
-Reading DICOM files dynamically requires `pydicom`, a CPU-intensive library, and calculating CLAHE and Unsharp Masking on a per-batch basis inside a PyTorch DataLoader creates a severe bottleneck. Your GPU will constantly stall at 0% utilization while waiting for the CPU to compute the medical filters.
+Reading DICOM files dynamically requires `pydicom`, a CPU-intensive library, and calculating CLAHE and Laplacian filters on a per-batch basis inside a PyTorch DataLoader creates a severe bottleneck. Your GPU will constantly stall at 0% utilization while waiting for the CPU to compute the medical filters.
 
 By performing this heavy transformation purely offline during the `scripts/data/prepare.py` step, we bake the complex logic into a static, highly optimized `.png` format. During training, we can read these PNGs practically instantly using standard libraries (`cv2.imread` or `PIL`) with blazing fast zero-copy optimizations, ensuring maximum GPU throughput.

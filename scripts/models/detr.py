@@ -9,8 +9,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from transformers import DetrConfig, DetrForObjectDetection, DetrImageProcessor
 
-from src.config import CLASS_NAMES, NUM_CLASSES, DataConfig, ModelConfig
-from src.models.base import BaseDetector, Detection
+from scripts.config import CLASS_NAMES, NUM_CLASSES, DataConfig, ModelConfig
+from scripts.models.base import BaseDetector, Detection
 
 
 # Map backbone_size string to HuggingFace model checkpoint
@@ -234,7 +234,7 @@ class DETRDetector(BaseDetector):
                     preds = self.predict([images[valid_idx]], image_size=img_size)
                     self.model.train()
 
-                    from src.visualize import draw_and_save_preview
+                    from scripts.visualize import draw_and_save_preview
 
                     save_path = (
                         self.output_dir / "val_previews" / f"epoch_{epoch:03d}.jpg"

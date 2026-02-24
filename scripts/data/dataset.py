@@ -9,14 +9,14 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-import src.config as app_config
-from src.config import DataConfig
-from src.data.transforms import (
+import scripts.config as app_config
+from scripts.config import DataConfig
+from scripts.data.transforms import (
     get_test_transforms,
     get_train_transforms,
     get_val_transforms,
 )
-from src.data.utils import (
+from scripts.data.utils import (
     aggregate_annotations,
     get_image_dims,
     load_annotations,
@@ -81,7 +81,6 @@ class VinBigDataset(Dataset):
             self.image_ids = image_ids if image_ids is not None else all_ids
         else:
             self.img_dir = self.root / "train"
-            self.ann_df = load_annotations(self.root / "train.csv")
 
             # If a manifest exists in the prepared dataset, reuse its splits
             # so image assignment is identical to what prepare_dataset built.
@@ -91,9 +90,12 @@ class VinBigDataset(Dataset):
                     with open(manifest_path) as f:
                         manifest = json.load(f)
                     all_ids = manifest.get(split, [])
+                    self.ann_df = pd.DataFrame()
                 else:
+                    self.ann_df = load_annotations(self.root / "train.csv")
                     all_ids = self._split_image_ids()
             else:
+                self.ann_df = load_annotations(self.root / "train.csv")
                 all_ids = self._split_image_ids()
 
             self.image_ids = image_ids if image_ids is not None else all_ids
@@ -194,6 +196,33 @@ class VinBigDataset(Dataset):
         Returns boxes (N,4) normalized xyxy and labels (N,) for one image.
         Loads original DICOM dims for normalization.
         """
+        if self._prepared_img_dir is not None:
+            lbl_path = self._prepared_img_dir.parent / "labels" / f"{image_id}.txt"
+            if lbl_path.exists():
+                lines = lbl_path.read_text().strip().splitlines()
+                if not lines:
+                    return np.zeros((0, 4), dtype=np.float32), np.zeros(
+                        0, dtype=np.int32
+                    )
+
+                boxes = []
+                labels = []
+                for line in lines:
+                    parts = line.split()
+                    if not parts:
+                        continue
+                    cls_id = int(parts[0])
+                    cx, cy, w, h = map(float, parts[1:])
+                    x1 = max(0.0, cx - w / 2)
+                    y1 = max(0.0, cy - h / 2)
+                    x2 = min(1.0, cx + w / 2)
+                    y2 = min(1.0, cy + h / 2)
+                    boxes.append([x1, y1, x2, y2])
+                    labels.append(cls_id)
+                return np.array(boxes, dtype=np.float32), np.array(
+                    labels, dtype=np.int32
+                )
+
         if self.ann_df.empty:
             return np.zeros((0, 4), dtype=np.float32), np.zeros(0, dtype=np.int32)
 

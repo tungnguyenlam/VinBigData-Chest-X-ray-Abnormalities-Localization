@@ -27,9 +27,9 @@ try:
 except ImportError:
     MeanAveragePrecision = None  # type: ignore
 
-from src.config import DataConfig, EnsembleConfig
-from src.data.dataset import build_dataloader
-from src.models.base import BaseDetector, Detection
+from scripts.config import DataConfig, EnsembleConfig
+from scripts.data.dataset import build_dataloader
+from scripts.models.base import BaseDetector, Detection
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +162,8 @@ def stack_predictions(
     pred_files : one JSONL file per model, in the same order as `weights`
     output_path: where to write the fused JSONL file
     """
-    from src.stacking.ensemble import StackingEnsemble
-    from src.config import EnsembleConfig
+    from scripts.stacking.ensemble import StackingEnsemble
+    from scripts.config import EnsembleConfig
 
     if cfg is None:
         cfg = EnsembleConfig()

@@ -13,8 +13,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import EnsembleConfig, get_output_root
-from src.predict_logger import stack_predictions
+from scripts.config import EnsembleConfig, get_output_root
+from scripts.predict_logger import stack_predictions
 
 
 def parse_args() -> argparse.Namespace:

@@ -4,22 +4,22 @@ YOLO proof-of-concept training script.
 Usage
 -----
 # Default: reads paths from paths.yaml, medium preset
-python src/models/train_yolo.py
+python scripts/models/train_yolo.py
 
 # Dataset already prepared — skip DICOM conversion, start training immediately
-python src/models/train_yolo.py --prepared_dataset data/processed
+python scripts/models/train_yolo.py --prepared_dataset data/processed
 
 # Small hardware (CPU, tiny model, 5 epochs)
-python src/models/train_yolo.py --preset small --epochs 5
+python scripts/models/train_yolo.py --preset small --epochs 5
 
 # Custom data path (e.g. Kaggle)
-python src/models/train_yolo.py --data /kaggle/input/vinbigdata-chest-xray-abnormalities-detection
+python scripts/models/train_yolo.py --data /kaggle/input/vinbigdata-chest-xray-abnormalities-detection
 
 # Larger model, more epochs, specific GPU
-python src/models/train_yolo.py --preset large --epochs 50 --device cuda:0
+python scripts/models/train_yolo.py --preset large --epochs 50 --device cuda:0
 
 # Skip training, just run predictions from existing weights
-python src/models/train_yolo.py --predict_only outputs/yolo/train/weights/best.pt --prepared_dataset data/processed
+python scripts/models/train_yolo.py --predict_only outputs/yolo/train/weights/best.pt --prepared_dataset data/processed
 """
 
 from __future__ import annotations
@@ -29,11 +29,11 @@ import gc
 import sys
 from pathlib import Path
 
-# Ensure the repo root (two levels up from src/models/) is on sys.path so
+# Ensure the repo root (two levels up from scripts/models/) is on sys.path so
 # `src.*` imports work when running this file directly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import (
+from scripts.config import (
     DataConfig,
     ModelConfig,
     HardwarePreset,
@@ -41,8 +41,8 @@ from src.config import (
     get_output_root,
     get_processed_data_root,
 )
-from src.models.yolo import YOLODetector
-from src.predict_logger import predict_and_log
+from scripts.models.yolo import YOLODetector
+from scripts.predict_logger import predict_and_log
 
 
 # ---------------------------------------------------------------------------
@@ -207,12 +207,12 @@ def main() -> None:
     output_root = args.output or get_output_root()
 
     if args.localize_only:
-        import src.config
+        from scripts import config
 
-        src.config.LOCALIZE_ONLY = True
-        src.config.NUM_CLASSES = 1
-        src.config.CLASS_NAMES = ["Abnormality"]
-        src.config.CLASS_ID_TO_IDX = {i: 0 for i in range(14)}
+        config.LOCALIZE_ONLY = True
+        config.NUM_CLASSES = 1
+        config.CLASS_NAMES = ["Abnormality"]
+        config.CLASS_ID_TO_IDX = {i: 0 for i in range(14)}
 
     # Resolve default model size from preset, then allow override
     preset_default_size = {"small": "n", "medium": "s", "large": "l"}[args.preset]
@@ -322,7 +322,7 @@ def main() -> None:
     print(
         "\nTo inspect predictions:\n"
         f'  python -c "'
-        f"from src.predict_logger import load_predictions; "
+        f"from scripts.predict_logger import load_predictions; "
         f"p = load_predictions('{pred_path}'); "
         f'img_id = next(iter(p)); print(img_id, p[img_id])"'
     )
