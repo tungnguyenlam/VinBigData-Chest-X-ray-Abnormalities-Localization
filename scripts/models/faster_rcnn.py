@@ -183,8 +183,10 @@ class FasterRCNNDetector(BaseDetector):
 
         self.model.train()
         total_loss = 0.0
+        n_batches = 0
 
-        for images, targets in tqdm(loader, desc=f"Train Epoch {epoch}", leave=False):
+        pbar = tqdm(loader, desc=f"Train Epoch {epoch}", leave=False)
+        for images, targets in pbar:
             images = [img.to(self.device) for img in images]
             targets_dev = [
                 {
@@ -220,6 +222,8 @@ class FasterRCNNDetector(BaseDetector):
             scaler.update()
 
             total_loss += loss.item()
+            n_batches += 1
+            pbar.set_postfix(loss=f"{total_loss / n_batches:.4f}")
 
         return total_loss / max(1, len(loader))
 
@@ -228,10 +232,12 @@ class FasterRCNNDetector(BaseDetector):
 
         self.model.train()  # keep in train mode to compute losses
         total_loss = 0.0
+        n_batches = 0
         saved_preview = False
 
+        pbar = tqdm(loader, desc=f"Val Epoch {epoch}", leave=False)
         with torch.no_grad():
-            for images, targets in tqdm(loader, desc=f"Val Epoch {epoch}", leave=False):
+            for images, targets in pbar:
                 images = [img.to(self.device) for img in images]
                 targets_dev = [
                     {
@@ -279,6 +285,8 @@ class FasterRCNNDetector(BaseDetector):
                     loss = sum(loss_dict.values())
 
                 total_loss += loss.item()
+                n_batches += 1
+                pbar.set_postfix(loss=f"{total_loss / n_batches:.4f}")
 
         return total_loss / max(1, len(loader))
 

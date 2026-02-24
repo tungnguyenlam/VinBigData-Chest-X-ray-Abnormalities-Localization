@@ -325,3 +325,176 @@ def evaluate_predictions(
 
     result: dict = metric.compute()
     return {k: float(v.item()) if hasattr(v, "item") else v for k, v in result.items()}
+
+
+# ---------------------------------------------------------------------------
+# FROC evaluation from a prediction JSONL file
+# ---------------------------------------------------------------------------
+
+
+def _compute_iou_matrix(
+    pred_boxes: np.ndarray, gt_boxes: np.ndarray
+) -> np.ndarray:
+    """Compute IoU between every pred box and every GT box. Both in xyxy format."""
+    x1 = np.maximum(pred_boxes[:, None, 0], gt_boxes[None, :, 0])
+    y1 = np.maximum(pred_boxes[:, None, 1], gt_boxes[None, :, 1])
+    x2 = np.minimum(pred_boxes[:, None, 2], gt_boxes[None, :, 2])
+    y2 = np.minimum(pred_boxes[:, None, 3], gt_boxes[None, :, 3])
+
+    inter = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
+
+    area_pred = (pred_boxes[:, 2] - pred_boxes[:, 0]) * (
+        pred_boxes[:, 3] - pred_boxes[:, 1]
+    )
+    area_gt = (gt_boxes[:, 2] - gt_boxes[:, 0]) * (
+        gt_boxes[:, 3] - gt_boxes[:, 1]
+    )
+    union = area_pred[:, None] + area_gt[None, :] - inter
+    return inter / np.maximum(union, 1e-8)
+
+
+def evaluate_froc(
+    pred_file: str | Path,
+    data_cfg: DataConfig,
+    split: Literal["train", "val", "test"] = "val",
+    iou_threshold: float = 0.5,
+    fp_rates: tuple[float, ...] = (0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0),
+    prepared_dataset_root: str | Path | None = None,
+) -> dict:
+    """
+    Compute FROC score from a saved JSONL prediction file against ground truth.
+
+    The FROC curve plots Lesion Localization Fraction (sensitivity) vs
+    average false positives per image.  The FROC score is the mean
+    sensitivity at the standard FP/image operating points.
+
+    Returns
+    -------
+    dict with keys:
+        froc_score        – mean sensitivity across operating points
+        sensitivities     – list of sensitivity values at each fp_rate
+        fp_rates          – the operating points used
+        total_gt_lesions  – number of ground truth lesions
+        total_images      – number of images evaluated
+        iou_threshold     – IoU threshold used for TP matching
+    """
+    preds_dict = load_predictions(pred_file)
+
+    loader = build_dataloader(
+        root=data_cfg.root,
+        split=split,
+        cfg=data_cfg,
+        output_format="torchvision",
+        shuffle=False,
+        prepared_dataset_root=prepared_dataset_root,
+    )
+
+    # Collect all (score, is_tp) pairs and count GT lesions / images
+    all_scores: list[float] = []
+    all_is_tp: list[bool] = []
+    total_gt_lesions = 0
+    total_images = 0
+
+    for _, targets in loader:
+        for target in targets:
+            img_id = target["image_id"]
+            det = preds_dict.get(img_id, Detection())
+            total_images += 1
+
+            gt_boxes = target["boxes"].numpy()  # (M, 4) absolute xyxy
+            n_gt = len(gt_boxes)
+            total_gt_lesions += n_gt
+
+            pred_boxes = det.boxes  # (K, 4) normalized [0,1]
+            pred_scores = det.scores
+
+            if len(pred_boxes) == 0:
+                continue
+
+            # Convert predicted boxes to absolute coords for IoU
+            pred_boxes_abs = pred_boxes.copy()
+            if pred_boxes_abs.ndim == 1:
+                continue
+            pred_boxes_abs[:, [0, 2]] *= data_cfg.image_size
+            pred_boxes_abs[:, [1, 3]] *= data_cfg.image_size
+
+            # Sort predictions by descending score
+            order = np.argsort(-pred_scores)
+            pred_boxes_abs = pred_boxes_abs[order]
+            pred_scores = pred_scores[order]
+
+            if n_gt == 0:
+                # All predictions are FP
+                for s in pred_scores:
+                    all_scores.append(float(s))
+                    all_is_tp.append(False)
+                continue
+
+            # Greedy matching: each GT box can be matched at most once
+            iou_matrix = _compute_iou_matrix(pred_boxes_abs, gt_boxes)
+            matched_gt = set()
+
+            for i in range(len(pred_scores)):
+                best_gt = -1
+                best_iou = iou_threshold  # minimum to qualify
+
+                for j in range(n_gt):
+                    if j in matched_gt:
+                        continue
+                    if iou_matrix[i, j] >= best_iou:
+                        best_iou = iou_matrix[i, j]
+                        best_gt = j
+
+                if best_gt >= 0:
+                    all_is_tp.append(True)
+                    matched_gt.add(best_gt)
+                else:
+                    all_is_tp.append(False)
+
+                all_scores.append(float(pred_scores[i]))
+
+    # Build FROC curve by sweeping thresholds
+    if len(all_scores) == 0:
+        sensitivities_at_rates = [0.0] * len(fp_rates)
+        return {
+            "froc_score": 0.0,
+            "sensitivities": sensitivities_at_rates,
+            "fp_rates": list(fp_rates),
+            "total_gt_lesions": total_gt_lesions,
+            "total_images": total_images,
+            "iou_threshold": iou_threshold,
+        }
+
+    scores_arr = np.array(all_scores)
+    is_tp_arr = np.array(all_is_tp)
+
+    # Sort by descending score
+    order = np.argsort(-scores_arr)
+    is_tp_sorted = is_tp_arr[order]
+
+    cum_tp = np.cumsum(is_tp_sorted).astype(np.float64)
+    cum_fp = np.cumsum(~is_tp_sorted).astype(np.float64)
+
+    sensitivity = cum_tp / max(total_gt_lesions, 1)
+    fp_per_image = cum_fp / max(total_images, 1)
+
+    # Interpolate sensitivity at each standard FP/image rate
+    sensitivities_at_rates: list[float] = []
+    for rate in fp_rates:
+        # Find the last index where fp_per_image <= rate
+        indices = np.where(fp_per_image <= rate)[0]
+        if len(indices) == 0:
+            sensitivities_at_rates.append(0.0)
+        else:
+            sensitivities_at_rates.append(float(sensitivity[indices[-1]]))
+
+    froc_score = float(np.mean(sensitivities_at_rates))
+
+    return {
+        "froc_score": froc_score,
+        "sensitivities": sensitivities_at_rates,
+        "fp_rates": list(fp_rates),
+        "total_gt_lesions": total_gt_lesions,
+        "total_images": total_images,
+        "iou_threshold": iou_threshold,
+    }
