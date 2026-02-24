@@ -21,6 +21,11 @@ def main():
     )
     parser.add_argument("--score_thr", type=float, default=0.0)
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument(
+        "--native-eval",
+        action="store_true",
+        help="Use Ultralytics native val() for evaluation (matches training metrics)",
+    )
     args = parser.parse_args()
 
     # Load config without resetting values
@@ -38,10 +43,64 @@ def main():
     model = YOLODetector(data_cfg, model_cfg)
     model.load(args.weights)
 
-    out_path = Path(model_cfg.output_path) / "yolo" / f"predictions_{args.split}.jsonl"
     prepared_dataset_root = Path(get_processed_data_root())
     if not (prepared_dataset_root / "dataset.yaml").exists():
         prepared_dataset_root = None
+
+    # --- Native Ultralytics evaluation ---
+    if args.native_eval:
+        yaml_path = (
+            prepared_dataset_root / "dataset.yaml" if prepared_dataset_root else None
+        )
+        if yaml_path is None or not yaml_path.exists():
+            print("Error: --native-eval requires data/processed/dataset.yaml")
+            return
+
+        print(f"Running Ultralytics native val() on {args.split} split...")
+        results = model.model.val(
+            data=str(yaml_path),
+            split=args.split,
+            imgsz=data_cfg.image_size,
+            batch=data_cfg.batch_size,
+            device=model_cfg.device,
+            verbose=True,
+        )
+
+        metrics = {
+            "map": float(results.box.map),
+            "map_50": float(results.box.map50),
+            "map_75": float(results.box.map75),
+        }
+        # Per-class maps if available
+        if hasattr(results.box, "maps") and len(results.box.maps) > 0:
+            for i, v in enumerate(results.box.maps):
+                metrics[f"map_class_{i}"] = float(v)
+
+        display_names = {
+            "map": "mAP@50-95",
+            "map_50": "mAP@50",
+            "map_75": "mAP@75",
+        }
+        print("\n  === Results (Ultralytics native) ===")
+        for k, v in metrics.items():
+            label = display_names.get(k, k)
+            print(f"  {label}: {v:.4f}")
+
+        # Save
+        metrics_path = (
+            Path(model_cfg.output_path) / "yolo" / f"native_metrics_{args.split}.json"
+        )
+        metrics_path.parent.mkdir(parents=True, exist_ok=True)
+        metrics["split"] = args.split
+        metrics["weights"] = args.weights
+        metrics["eval_mode"] = "ultralytics_native"
+        with open(metrics_path, "w") as f:
+            json.dump(metrics, f, indent=2)
+        print(f"\n  Metrics saved to {metrics_path}")
+        return
+
+    # --- Standard predict + torchmetrics evaluation ---
+    out_path = Path(model_cfg.output_path) / "yolo" / f"predictions_{args.split}.jsonl"
 
     predict_and_log(
         model=model,
