@@ -74,7 +74,7 @@ def dicom_to_3channel_8bit(
     upper_val = np.percentile(arr, 99.5)
     if upper_val > lower_val:
         arr_f32 = np.clip(arr, lower_val, upper_val)
-        arr_f32 = (arr_f32 - lower_val) / (upper_val - lower_val)
+        arr_f32 = ((arr_f32 - lower_val) / (upper_val - lower_val)).astype(np.float32)
     else:
         arr_f32 = np.zeros_like(arr, dtype=np.float32)
 

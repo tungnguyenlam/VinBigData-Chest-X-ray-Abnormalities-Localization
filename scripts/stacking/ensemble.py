@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from scripts.config import EnsembleConfig, NUM_CLASSES
+from scripts.config import EnsembleConfig, NUM_CLASSES, DataConfig
 from scripts.models.base import BaseDetector, Detection
 
 
@@ -25,7 +25,7 @@ class StackingEnsemble:
             models=[yolo_detector, frcnn_detector, detr_detector],
             cfg=EnsembleConfig(iou_thr=0.5, skip_box_thr=0.05),
         )
-        detections = ensemble.predict(images, image_size=640)
+        detections = ensemble.predict(images)
     """
 
     def __init__(
@@ -51,7 +51,7 @@ class StackingEnsemble:
     def predict(
         self,
         images: list[torch.Tensor] | torch.Tensor,
-        image_size: int = 640,
+        image_size: Optional[int] = None,
         score_threshold: float = 0.05,
     ) -> list[Detection]:
         """
@@ -59,6 +59,8 @@ class StackingEnsemble:
 
         Returns one Detection per image.
         """
+        image_size = image_size or DataConfig().image_size
+
         # Collect per-model predictions  shape: [num_models][num_images]
         all_preds: list[list[Detection]] = []
         for model in self.models:
@@ -79,13 +81,15 @@ class StackingEnsemble:
     def predict_loader(
         self,
         loader: DataLoader,
-        image_size: int = 640,
+        image_size: Optional[int] = None,
         score_threshold: float = 0.05,
     ) -> dict[str, Detection]:
         """
         Run ensemble inference over an entire DataLoader.
         Returns a dict mapping image_id → Detection.
         """
+        image_size = image_size or DataConfig().image_size
+
         results: dict[str, Detection] = {}
 
         for images, targets in loader:
@@ -94,7 +98,9 @@ class StackingEnsemble:
             else:
                 image_list = images
 
-            detections = self.predict(image_list, image_size=image_size, score_threshold=score_threshold)
+            detections = self.predict(
+                image_list, image_size=image_size, score_threshold=score_threshold
+            )
 
             for det, target in zip(detections, targets):
                 results[target["image_id"]] = det
@@ -113,8 +119,8 @@ class StackingEnsemble:
 
         # Remove empty predictions
         non_empty = [
-            (b, s, l)
-            for b, s, l in zip(boxes_list, scores_list, labels_list)
+            (b, s, lbl)
+            for b, s, lbl in zip(boxes_list, scores_list, labels_list)
             if len(b) > 0
         ]
         if not non_empty:
@@ -172,7 +178,7 @@ class StackingEnsemble:
 
             method = self.cfg.method
             if method == "wbf":
-                fb, fs, fl = weighted_boxes_fusion(
+                f_boxes, f_scores, f_labels = weighted_boxes_fusion(
                     cls_boxes_list_safe,
                     cls_scores_list_safe,
                     cls_labels_list,
@@ -181,16 +187,16 @@ class StackingEnsemble:
                     skip_box_thr=self.cfg.skip_box_thr,
                 )
             elif method == "soft_nms":
-                fb, fs, fl = soft_nms(
+                f_boxes, f_scores, f_labels = soft_nms(
                     cls_boxes_list_safe,
                     cls_scores_list_safe,
                     cls_labels_list,
                     weights=self.cfg.weights,
                     iou_thr=self.cfg.iou_thr,
-                    skip_box_thr=self.cfg.skip_box_thr,
+                    thresh=self.cfg.skip_box_thr,
                 )
             else:  # nms
-                fb, fs, fl = nms(
+                f_boxes, f_scores, f_labels = nms(
                     cls_boxes_list_safe,
                     cls_scores_list_safe,
                     cls_labels_list,
@@ -198,10 +204,10 @@ class StackingEnsemble:
                     iou_thr=self.cfg.iou_thr,
                 )
 
-            if len(fb) > 0:
-                all_boxes.append(fb.astype(np.float32))
-                all_scores.append(fs.astype(np.float32))
-                all_labels.append(fl.astype(np.int32))
+            if len(f_boxes) > 0:
+                all_boxes.append(f_boxes.astype(np.float32))
+                all_scores.append(f_scores.astype(np.float32))
+                all_labels.append(f_labels.astype(np.int32))
 
         if not all_boxes:
             return Detection()
@@ -219,7 +225,7 @@ class StackingEnsemble:
     def tune_weights_by_map(
         self,
         val_loader: DataLoader,
-        image_size: int = 640,
+        image_size: Optional[int] = None,
     ) -> list[float]:
         """
         Compute per-model validation mAP and use as ensemble weights.
@@ -227,6 +233,7 @@ class StackingEnsemble:
 
         Requires torchmetrics: pip install torchmetrics
         """
+        image_size = image_size or DataConfig().image_size
         try:
             from torchmetrics.detection.mean_ap import MeanAveragePrecision
         except ImportError:
@@ -234,7 +241,9 @@ class StackingEnsemble:
 
         maps: list[float] = []
         for model in self.models:
-            metric = MeanAveragePrecision(box_format="xyxy", iou_type="bbox")
+            from typing import Any
+
+            metric: Any = MeanAveragePrecision(box_format="xyxy", iou_type="bbox")
             for images, targets in val_loader:
                 if isinstance(images, torch.Tensor):
                     image_list = [images[i] for i in range(images.shape[0])]
@@ -258,9 +267,9 @@ class StackingEnsemble:
                     }
                     for t in targets
                 ]
-                metric.update(preds_fmt, targets_fmt)
+                metric.update(preds=preds_fmt, target=targets_fmt)  # type: ignore
 
-            result = metric.compute()
+            result = metric.compute()  # type: ignore
             maps.append(float(result["map"].item()))
             print(f"  Model {type(model).__name__}: mAP={maps[-1]:.4f}")
 

@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from scripts.config import HardwarePreset, get_processed_data_root
 from scripts.models.yolo import YOLODetector
-from scripts.predict_logger import predict_and_log
+from scripts.predict_logger import predict_and_log, evaluate_predictions
 
 
 def main():
@@ -52,6 +52,18 @@ def main():
         prepared_dataset_root=prepared_dataset_root,
     )
     print(f"Predictions saved to {out_path}")
+
+    if args.split != "test":
+        print(f"Evaluating predictions on {args.split} split...")
+        try:
+            metrics = evaluate_predictions(out_path, data_cfg, split=args.split)
+            for k, v in metrics.items():
+                if isinstance(v, float):
+                    print(f"  {k}: {v:.4f}")
+                else:
+                    print(f"  {k}: {v}")
+        except Exception as e:
+            print(f"Evaluation failed: {e}")
 
 
 if __name__ == "__main__":
