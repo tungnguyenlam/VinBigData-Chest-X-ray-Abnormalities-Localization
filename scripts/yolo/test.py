@@ -53,22 +53,21 @@ def main():
     )
     print(f"Predictions saved to {out_path}")
 
-    if args.split != "test":
-        print(f"Evaluating predictions on {args.split} split...")
-        try:
-            metrics = evaluate_predictions(
-                out_path,
-                data_cfg,
-                split=args.split,
-                prepared_dataset_root=prepared_dataset_root,
-            )
-            for k, v in metrics.items():
-                if isinstance(v, float):
-                    print(f"  {k}: {v:.4f}")
-                else:
-                    print(f"  {k}: {v}")
-        except Exception as e:
-            print(f"Evaluation failed: {e}")
+    print(f"Evaluating predictions on {args.split} split...")
+    try:
+        metrics = evaluate_predictions(
+            out_path,
+            data_cfg,
+            split=args.split,
+            prepared_dataset_root=prepared_dataset_root,
+        )
+        for k, v in metrics.items():
+            if isinstance(v, float):
+                print(f"  {k}: {v:.4f}")
+            else:
+                print(f"  {k}: {v}")
+    except Exception as e:
+        print(f"Evaluation failed: {e}")
 
 
 if __name__ == "__main__":
