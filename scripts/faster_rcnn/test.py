@@ -38,10 +38,24 @@ def main():
     }[args.preset](arch="faster_rcnn")
     data_cfg = preset.data
     model_cfg = preset.model
-    if args.device:
-        model_cfg.device = args.device
+    # Try to auto-detect backbone from metadata if not explicitly provided
+    weights_path = Path(args.weights)
+    meta_path = weights_path.with_suffix(".meta.json")
+    
     if args.backbone:
         model_cfg.backbone_size = args.backbone
+    elif meta_path.exists():
+        try:
+            with open(meta_path, "r") as f:
+                meta = json.load(f)
+            if "backbone" in meta:
+                model_cfg.backbone_size = meta["backbone"]
+                print(f"Auto-detected backbone from {meta_path.name}: {model_cfg.backbone_size}")
+        except Exception as e:
+            print(f"Failed to load metadata: {e}")
+
+    if args.device:
+        model_cfg.device = args.device
 
     prepared_dataset_root = Path(get_processed_data_root())
     if not (prepared_dataset_root / "dataset.yaml").exists():
