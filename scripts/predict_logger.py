@@ -479,6 +479,8 @@ def evaluate_froc(
             "total_gt_lesions": total_gt_lesions,
             "total_images": total_images,
             "iou_threshold": iou_threshold,
+            "precision": 0.0,
+            "recall": 0.0,
         }
 
     scores_arr = np.array(all_scores)
@@ -491,8 +493,14 @@ def evaluate_froc(
     cum_tp = np.cumsum(is_tp_sorted).astype(np.float64)
     cum_fp = np.cumsum(~is_tp_sorted).astype(np.float64)
 
+    precision = cum_tp / (cum_tp + cum_fp + 1e-8)
     sensitivity = cum_tp / max(total_gt_lesions, 1)
     fp_per_image = cum_fp / max(total_images, 1)
+
+    f1 = 2 * (precision * sensitivity) / (precision + sensitivity + 1e-8)
+    best_idx = np.argmax(f1) if len(f1) > 0 else -1
+    best_precision = float(precision[best_idx]) if best_idx >= 0 else 0.0
+    best_recall = float(sensitivity[best_idx]) if best_idx >= 0 else 0.0
 
     # Interpolate sensitivity at each standard FP/image rate
     sensitivities_at_rates: list[float] = []
@@ -513,4 +521,6 @@ def evaluate_froc(
         "total_gt_lesions": total_gt_lesions,
         "total_images": total_images,
         "iou_threshold": iou_threshold,
+        "precision": best_precision,
+        "recall": best_recall,
     }

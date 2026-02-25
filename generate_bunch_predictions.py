@@ -32,6 +32,12 @@ jsonl_paths = [
     'outputs/ensemble/test/fused_predictions_wbf.jsonl'
 ]
 
+YOLO_THRESH = 0.4
+FASTER_RCNN_THRESH = 0.4
+ENSEMBLE_THRESH = 0.4
+
+thresholds = [YOLO_THRESH, FASTER_RCNN_THRESH, ENSEMBLE_THRESH]
+
 for img_id in image_ids:
     image_path = f"data/processed/test/images/{img_id}.png"
     titles = [f"YOLO v8: {img_id}", f"Faster R-CNN: {img_id}", f"Ensemble WBF: {img_id}"]
@@ -41,7 +47,8 @@ for img_id in image_ids:
         jsonl_paths=jsonl_paths,
         titles=titles,
         output_path=os.path.join(OUTPUT_DIR, f'{img_id}_comparison.png'),
-        labels_dir='data/processed/test/labels'
+        labels_dir='data/processed/test/labels',
+        thresholds=thresholds
     )
     
     print(f"Generated plots for image: {img_id}")

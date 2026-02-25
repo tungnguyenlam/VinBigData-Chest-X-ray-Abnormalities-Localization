@@ -34,7 +34,7 @@ def plot_box_count_distribution(csv_path, output_path):
     df = pd.read_csv(csv_path)
     box_counts = df.groupby('image_id').size()
     
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(15, 6))
     plt.hist(box_counts, bins=range(1, box_counts.max() + 2), align='left', rwidth=0.8, color='skyblue', edgecolor='black')
     plt.xlabel('Number of Bounding Boxes', fontsize=14)
     plt.ylabel('Number of Images', fontsize=14)

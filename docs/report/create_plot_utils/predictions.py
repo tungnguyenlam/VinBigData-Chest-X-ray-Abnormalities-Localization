@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 import matplotlib.patches as patches
 
-def plot_prediction_example(image_path, jsonl_path, output_path, title="Prediction Example"):
+def plot_prediction_example(image_path, jsonl_path, output_path, title="Prediction Example", threshold=0.0):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     img = cv2.imread(image_path)
@@ -33,6 +33,9 @@ def plot_prediction_example(image_path, jsonl_path, output_path, title="Predicti
     for idx, box_info in enumerate(boxes):
         score = scores[idx] if idx < len(scores) else 1.0
         
+        if score < threshold:
+            continue
+        
         if len(box_info) >= 4:
             x_min, y_min, x_max, y_max = box_info[:4]
             
@@ -45,7 +48,7 @@ def plot_prediction_example(image_path, jsonl_path, output_path, title="Predicti
             rect = patches.Rectangle((x_min, y_min), width_box, height_box, linewidth=2, edgecolor='red', facecolor='none')
             ax.add_patch(rect)
             
-            ax.text(x_min, y_min - 5, f"{score:.2f}", color='red', fontsize=12, backgroundcolor='white')
+            ax.text(x_min, y_min - 5, f"Anomaly: {score:.2f}", color='red', fontsize=12, backgroundcolor='white')
             
     ax.axis('off')
     ax.set_title(title, fontsize=16)
@@ -55,7 +58,7 @@ def plot_prediction_example(image_path, jsonl_path, output_path, title="Predicti
 
 import pandas as pd
 
-def _draw_boxes_on_ax(ax, img_rgb, image_id, jsonl_path, h, w, gt_boxes=None):
+def _draw_boxes_on_ax(ax, img_rgb, image_id, jsonl_path, h, w, gt_boxes=None, threshold=0.0):
     if gt_boxes is None:
         gt_boxes = []
         
@@ -85,6 +88,9 @@ def _draw_boxes_on_ax(ax, img_rgb, image_id, jsonl_path, h, w, gt_boxes=None):
     for idx, box_info in enumerate(boxes):
         score = scores[idx] if idx < len(scores) else 1.0
         
+        if score < threshold:
+            continue
+            
         if len(box_info) >= 4:
             x_min, y_min, x_max, y_max = box_info[:4]
             
@@ -96,32 +102,20 @@ def _draw_boxes_on_ax(ax, img_rgb, image_id, jsonl_path, h, w, gt_boxes=None):
             
             rect = patches.Rectangle((x_min, y_min), width_box, height_box, linewidth=2, edgecolor='red', facecolor='none')
             ax.add_patch(rect)
-            ax.text(x_min, y_min - 5, f"{score:.2f}", color='red', fontsize=12, backgroundcolor='white')
+            ax.text(x_min, y_min - 5, f"Anomaly: {score:.2f}", color='red', fontsize=12, backgroundcolor='white')
 
     ax.axis('off')
 
 
-CLASS_MAPPING = {
-    0: 'Aortic enlargement',
-    1: 'Atelectasis',
-    2: 'Calcification',
-    3: 'Cardiomegaly',
-    4: 'Consolidation',
-    5: 'ILD',
-    6: 'Infiltration',
-    7: 'Lung Opacity',
-    8: 'Nodule/Mass',
-    9: 'Other lesion',
-    10: 'Pleural effusion',
-    11: 'Pleural thickening',
-    12: 'Pneumothorax',
-    13: 'Pulmonary fibrosis',
-    14: 'No finding'
-}
+# We are doing anomaly localization only, so we use a single class name
+MODELS_CLASS_NAME = 'Anomaly'
 
-def plot_prediction_subplots(image_path, jsonl_paths, titles, output_path, labels_dir=None):
+def plot_prediction_subplots(image_path, jsonl_paths, titles, output_path, labels_dir=None, thresholds=None):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
+    if thresholds is None:
+        thresholds = [0.0] * len(jsonl_paths)
+        
     img = cv2.imread(image_path)
     if img is None:
         print(f"Image not found: {image_path}")
@@ -148,15 +142,18 @@ def plot_prediction_subplots(image_path, jsonl_paths, titles, output_path, label
                         x_max = (cx + bw / 2) * w
                         y_max = (cy + bh / 2) * h
                         
-                        class_name = CLASS_MAPPING.get(class_id, str(class_id))
+                        if class_id == 14: # Skip 'No finding'
+                            continue
+                            
+                        class_name = MODELS_CLASS_NAME
                         gt_boxes.append([x_min, y_min, x_max, y_max, class_name])
             
     fig, axes = plt.subplots(1, len(jsonl_paths), figsize=(20, 8))
     if len(jsonl_paths) == 1:
         axes = [axes]
         
-    for ax, jsonl_path, title in zip(axes, jsonl_paths, titles):
-        _draw_boxes_on_ax(ax, img_rgb, image_id, jsonl_path, h, w, gt_boxes=gt_boxes)
+    for ax, jsonl_path, title, thresh in zip(axes, jsonl_paths, titles, thresholds):
+        _draw_boxes_on_ax(ax, img_rgb, image_id, jsonl_path, h, w, gt_boxes=gt_boxes, threshold=thresh)
         ax.set_title(title, fontsize=16)
         
     plt.tight_layout()

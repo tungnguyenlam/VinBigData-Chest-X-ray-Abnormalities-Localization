@@ -112,6 +112,25 @@ def main() -> None:
     args = parse_args()
 
     # 1. Collect inputs and maintain strict ordering for weights
+    # Auto-resolve paths if not provided, but only if the default file exists
+    if not args.yolo_pred:
+        default_yolo = f"outputs/yolo/yolo/predictions_{args.split}.jsonl"
+        if Path(default_yolo).exists():
+            args.yolo_pred = default_yolo
+            print(f"Auto-detected YOLO predictions: {default_yolo}")
+            
+    if not args.frcnn_pred:
+        default_frcnn = f"outputs/faster_rcnn/faster_rcnn/predictions_{args.split}.jsonl"
+        if Path(default_frcnn).exists():
+            args.frcnn_pred = default_frcnn
+            print(f"Auto-detected Faster R-CNN predictions: {default_frcnn}")
+            
+    if not args.detr_pred:
+        default_detr = f"outputs/detr/detr/predictions_{args.split}.jsonl"
+        if Path(default_detr).exists():
+            args.detr_pred = default_detr
+            print(f"Auto-detected DETR predictions: {default_detr}")
+
     model_preds = []
     model_names = []
     
@@ -214,20 +233,7 @@ def main() -> None:
             prepared_dataset_root=prepared_dataset_root,
         )
 
-        display_names = {
-            "map": "mAP@50-95",
-            "map_50": "mAP@50",
-            "map_75": "mAP@75",
-        }
-        print("\n  === Results ===")
-        for k, v in metrics.items():
-            label = display_names.get(k, k)
-            if isinstance(v, float):
-                print(f"  {label}: {v:.4f}")
-            else:
-                print(f"  {label}: {v}")
-
-        # --- FROC evaluation ---
+        # --- FROC evaluation (moved up to extract Precision/Recall) ---
         print(f"\n  Computing FROC score on {args.split} split...")
         froc_result = evaluate_froc(
             fused_path,
@@ -235,6 +241,28 @@ def main() -> None:
             split=args.split,
             prepared_dataset_root=prepared_dataset_root,
         )
+
+        metrics["precision"] = froc_result["precision"]
+        metrics["recall"] = froc_result["recall"]
+
+        display_names = {
+            "map": "mAP@50-95",
+            "map_50": "mAP@50",
+            "map_75": "mAP@75",
+            "precision": "Precision",
+            "recall": "Recall",
+        }
+        
+        keys_to_keep = ["map", "map_50", "map_75", "precision", "recall"]
+        metrics_print = {k: v for k, v in metrics.items() if k in keys_to_keep}
+
+        print("\n  === Results ===")
+        for k, v in metrics_print.items():
+            label = display_names.get(k, k)
+            if isinstance(v, float):
+                print(f"  {label}: {v:.4f}")
+            else:
+                print(f"  {label}: {v}")
 
         print(f"\n  === FROC Results (IoU={froc_result['iou_threshold']}) ===")
         print(f"  FROC Score: {froc_result['froc_score']:.4f}")
