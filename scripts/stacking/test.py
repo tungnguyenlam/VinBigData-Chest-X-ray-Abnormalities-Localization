@@ -161,7 +161,21 @@ def main() -> None:
     
     output_dir = Path(get_output_root()) / "ensemble" / args.split
     output_dir.mkdir(parents=True, exist_ok=True)
-    fused_path = output_dir / f"fused_predictions_{args.ensemble_method}.jsonl"
+
+    # Auto-detect WBF sub-type for distinct output filenames
+    wbf_variant = "default"
+    if args.ensemble_method == "wbf":
+        if args.normalize_scores:
+            wbf_variant = "normalized"
+        elif weights and not all(w == weights[0] for w in weights):
+            # Non-equal manual weights → "skew" variant
+            wbf_variant = "skew"
+
+    # Build filename with variant suffix to avoid overwrites
+    if args.ensemble_method == "wbf" and wbf_variant != "default":
+        fused_path = output_dir / f"fused_predictions_wbf_{wbf_variant}.jsonl"
+    else:
+        fused_path = output_dir / f"fused_predictions_{args.ensemble_method}.jsonl"
     
     print(f"\n--- Stacking Models ({args.split} split) ---")
     print(f"Models: {', '.join(model_names)}")
@@ -251,6 +265,8 @@ def main() -> None:
         serializable["models"] = model_names
         serializable["weights"] = weights if weights else [1.0] * len(model_names)
         serializable["ensemble_method"] = args.ensemble_method
+        serializable["normalize_scores"] = args.normalize_scores
+        serializable["wbf_variant"] = wbf_variant
         serializable["score_threshold"] = args.score_thr
 
         with open(metrics_path, "w") as f:
