@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from scripts.config import HardwarePreset, get_processed_data_root
 from scripts.models.yolo import YOLODetector
-from scripts.predict_logger import predict_and_log, evaluate_predictions
+from scripts.predict_logger import predict_and_log, evaluate_predictions, evaluate_froc
 
 
 def main():
@@ -136,13 +136,36 @@ def main():
             else:
                 print(f"  {label}: {v}")
 
+        # --- FROC evaluation ---
+        print(f"\n  Computing FROC score on {args.split} split...")
+        froc_result = evaluate_froc(
+            out_path,
+            data_cfg,
+            split=args.split,
+            prepared_dataset_root=prepared_dataset_root,
+        )
+
+        print(f"\n  === FROC Results (IoU={froc_result['iou_threshold']}) ===")
+        print(f"  FROC Score: {froc_result['froc_score']:.4f}")
+        print(
+            f"  GT Lesions: {froc_result['total_gt_lesions']}  |  Images: {froc_result['total_images']}"
+        )
+        for rate, sens in zip(froc_result["fp_rates"], froc_result["sensitivities"]):
+            print(f"    Sensitivity @ {rate} FP/img: {sens:.4f}")
+
+        # Merge FROC into metrics
+        metrics["froc_score"] = froc_result["froc_score"]
+        metrics["froc_sensitivities"] = froc_result["sensitivities"]
+        metrics["froc_fp_rates"] = froc_result["fp_rates"]
+        metrics["froc_iou_threshold"] = froc_result["iou_threshold"]
+
         # Save metrics to JSON
         metrics_path = out_path.with_suffix(".metrics.json")
         serializable = {}
         for k, v in metrics.items():
             if isinstance(v, float):
                 serializable[k] = round(v, 6)
-            elif isinstance(v, (int, str, bool)):
+            elif isinstance(v, (int, str, bool, list)):
                 serializable[k] = v
             else:
                 serializable[k] = str(v)
