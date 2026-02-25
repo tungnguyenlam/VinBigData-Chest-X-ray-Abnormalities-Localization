@@ -117,16 +117,23 @@ class StackingEnsemble:
         scores_list = [p.scores.tolist() for p in preds]
         labels_list = [p.labels.tolist() for p in preds]
 
+        # Match weights array if we have one
+        weights = (
+            self.cfg.weights
+            if self.cfg.weights is not None
+            else [None] * len(boxes_list)
+        )
+
         # Remove empty predictions
         non_empty = [
-            (b, s, lbl)
-            for b, s, lbl in zip(boxes_list, scores_list, labels_list)
+            (b, s, lbl, w)
+            for b, s, lbl, w in zip(boxes_list, scores_list, labels_list, weights)
             if len(b) > 0
         ]
         if not non_empty:
             return Detection()
 
-        boxes_list, scores_list, labels_list = zip(*non_empty)
+        boxes_list, scores_list, labels_list, active_weights = zip(*non_empty)
 
         # Normalize labels to [0, 1] range for WBF (it expects class scores, not IDs)
         # We encode per-class separately then reassemble
@@ -134,6 +141,7 @@ class StackingEnsemble:
             list(boxes_list),
             list(scores_list),
             list(labels_list),
+            list(active_weights) if active_weights[0] is not None else None,
         )
 
     def _wbf_multiclass(
@@ -141,6 +149,7 @@ class StackingEnsemble:
         boxes_list: list[list],
         scores_list: list[list],
         labels_list: list[list],
+        active_weights: list[float] | None,
     ) -> Detection:
         """
         Run WBF per class then combine, which gives cleaner results than
@@ -182,7 +191,7 @@ class StackingEnsemble:
                     cls_boxes_list_safe,
                     cls_scores_list_safe,
                     cls_labels_list,
-                    weights=self.cfg.weights,
+                    weights=active_weights,
                     iou_thr=self.cfg.iou_thr,
                     skip_box_thr=self.cfg.skip_box_thr,
                 )
@@ -191,7 +200,7 @@ class StackingEnsemble:
                     cls_boxes_list_safe,
                     cls_scores_list_safe,
                     cls_labels_list,
-                    weights=self.cfg.weights,
+                    weights=active_weights,
                     iou_thr=self.cfg.iou_thr,
                     thresh=self.cfg.skip_box_thr,
                 )
@@ -200,7 +209,7 @@ class StackingEnsemble:
                     cls_boxes_list_safe,
                     cls_scores_list_safe,
                     cls_labels_list,
-                    weights=self.cfg.weights,
+                    weights=active_weights,
                     iou_thr=self.cfg.iou_thr,
                 )
 
