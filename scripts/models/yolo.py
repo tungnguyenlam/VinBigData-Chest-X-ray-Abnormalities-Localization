@@ -181,7 +181,12 @@ class YOLODetector(BaseDetector):
             else:
                 converted.append(img)
 
-        results = self.model(converted, imgsz=image_size, verbose=False)
+        results = self.model(
+            converted,
+            imgsz=image_size,
+            verbose=False,
+            conf=0.001,  # Retain low-confidence boxes for mAP/FROC sweeping
+        )
 
         detections: list[Detection] = []
         for r in results:
@@ -208,7 +213,12 @@ class YOLODetector(BaseDetector):
         matching exactly what it does during training validation.
         """
         str_paths = [str(p) for p in paths]
-        results = self.model(str_paths, imgsz=image_size, verbose=False)
+        results = self.model(
+            str_paths,
+            imgsz=image_size,
+            verbose=False,
+            conf=0.001,  # Retain low-confidence boxes for mAP/FROC sweeping
+        )
 
         detections: list[Detection] = []
         for r in results:
