@@ -124,16 +124,10 @@ class StackingEnsemble:
             else [None] * len(boxes_list)
         )
 
-        # Remove empty predictions
-        non_empty = [
-            (b, s, lbl, w)
-            for b, s, lbl, w in zip(boxes_list, scores_list, labels_list, weights)
-            if len(b) > 0
-        ]
-        if not non_empty:
+        # Do not remove empty predictions so that weights remain perfectly aligned
+        # with the models. If all models are empty, just short-circuit.
+        if all(len(b) == 0 for b in boxes_list):
             return Detection()
-
-        boxes_list, scores_list, labels_list, active_weights = zip(*non_empty)
 
         # Normalize labels to [0, 1] range for WBF (it expects class scores, not IDs)
         # We encode per-class separately then reassemble
@@ -141,7 +135,7 @@ class StackingEnsemble:
             list(boxes_list),
             list(scores_list),
             list(labels_list),
-            list(active_weights) if active_weights[0] is not None else None,
+            list(weights) if weights[0] is not None else None,
         )
 
     def _wbf_multiclass(

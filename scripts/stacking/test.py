@@ -84,6 +84,11 @@ def parse_args() -> argparse.Namespace:
         default=0.05,
         help="skip_box_thr for ensemble fusion (boxes below this score are dropped before fusion).",
     )
+    parser.add_argument(
+        "--normalize-scores",
+        action="store_true",
+        help="Apply Min-Max scaling to the scores of each model before fusion.",
+    )
     
     # Evaluation parameters
     parser.add_argument(
@@ -170,6 +175,7 @@ def main() -> None:
         output_path=fused_path,
         cfg=ensemble_cfg,
         weights=weights,
+        normalize=args.normalize_scores,
     )
     print(f"Fused predictions saved to → {fused_path}")
 

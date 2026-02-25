@@ -186,6 +186,7 @@ def stack_predictions(
     output_path: str | Path,
     cfg: EnsembleConfig | None = None,
     weights: list[float] | None = None,
+    normalize: bool = False,
 ) -> Path:
     """
     Fuse per-model JSONL prediction files using WBF — no models in memory.
@@ -215,6 +216,21 @@ def stack_predictions(
 
     # Load all predictions into memory — only boxes/scores/labels, not images
     per_model: list[dict[str, Detection]] = [load_predictions(pf) for pf in pred_files]
+
+    if normalize:
+        for model_preds in per_model:
+            all_scores = []
+            for det in model_preds.values():
+                if len(det.scores) > 0:
+                    all_scores.append(det.scores)
+            if all_scores:
+                concat_scores = np.concatenate(all_scores)
+                min_s = float(np.min(concat_scores))
+                max_s = float(np.max(concat_scores))
+                if max_s > min_s:
+                    for det in model_preds.values():
+                        if len(det.scores) > 0:
+                            det.scores = (det.scores - min_s) / (max_s - min_s)
 
     # Dummy ensemble with no models — we call _fuse_single directly
     dummy_ensemble = StackingEnsemble.__new__(StackingEnsemble)
